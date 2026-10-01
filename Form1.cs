@@ -120,26 +120,47 @@ public partial class Form1 : Form
     {
         try
         {
+            if (string.IsNullOrWhiteSpace(txtBarkod.Text))
+            {
+                MessageBox.Show("Lütfen bir barkod numarası girin!", "Uyarı", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
             using (Report report = new Report())
             {
                 report.Load(sablonYolu);
 
-                // Kullanıcının formda girdiği değerleri şablondaki parametrelere aktar
-                report.SetParameterValue("BarkodNo", txtBarkod.Text);
-                report.SetParameterValue("UrunAdi", txtUrunAdi.Text);
-                report.SetParameterValue("Fiyat", txtFiyat.Text);
+                // 1. Parametreleri doldur
+                report.SetParameterValue("BarkodNo", txtBarkod.Text.Trim());
+                report.SetParameterValue("UrunAdi", txtUrunAdi.Text.Trim());
+                report.SetParameterValue("Fiyat", txtFiyat.Text.Trim());
 
-                // Önizleme penceresini açar (Buradan direk yazdır simgesiyle yazıcıya da basılabilir)
+                // 2. Şablondaki nesneleri doğrudan kullanıcının girdiği değerle garanti güncelle
+                var barcode = report.FindObject("Barcode1") as FastReport.Barcode.BarcodeObject;
+                if (barcode != null)
+                {
+                    barcode.Barcode = new FastReport.Barcode.Barcode128();
+                    barcode.Expression = "";
+                    barcode.Text = txtBarkod.Text.Trim(); // Kullanıcının yazdığı barkod
+                    barcode.ShowText = true;
+                }
+
+                var txtUrun = report.FindObject("txtUrunAdi") as FastReport.TextObject;
+                if (txtUrun != null)
+                {
+                    txtUrun.Text = txtUrunAdi.Text.Trim(); // Kullanıcının yazdığı ürün adı
+                }
+
+                var txtFiyatObj = report.FindObject("txtFiyat") as FastReport.TextObject;
+                if (txtFiyatObj != null)
+                {
+                    txtFiyatObj.Text = $"Fiyat: {txtFiyat.Text.Trim()} TL"; // Kullanıcının yazdığı fiyat
+                }
+
+                // Önizleme penceresini açar
                 report.Show();
 
-                /*
-                // EĞER DİREKT BARKOD YAZICIYA HİÇ PENCERE AÇMADAN (SİLENT PRİNT) BASMAK İSTERSEN:
-                report.PrintSettings.Printer = "Zebra ZD420"; // veya barkod yazıcının adı
-                report.PrintSettings.ShowDialog = false;      // Yazdırma diyaloğunu gizle
-                report.Print();
-                */
-
-                lblDurum.Text = "Durum: Tekli etiket ekranda önizlendi / yazdırıldı.";
+                lblDurum.Text = $"Durum: [{txtBarkod.Text.Trim()}] barkodu ile etiket önizlendi.";
             }
         }
         catch (Exception ex)
@@ -172,17 +193,40 @@ public partial class Form1 : Form
             {
                 report.Load(sablonYolu);
 
-                // Listeyi rapora "Urunler" veri kaynağı olarak tanıt
+                // 1. Listeyi veri kaynağı olarak tanıt ve etkinleştir
                 report.RegisterData(urunListesi, "Urunler");
+                var dataSource = report.GetDataSource("Urunler");
+                dataSource.Enabled = true;
 
-                // İlk satır değerini de parametreye aktar
-                report.SetParameterValue("BarkodNo", urunListesi[0].BarkodNo);
-                report.SetParameterValue("UrunAdi", urunListesi[0].UrunAdi);
-                report.SetParameterValue("Fiyat", urunListesi[0].Fiyat);
+                // 2. Şablondaki DataBand'i bu listeye bağla
+                var dataBand = report.FindObject("Data1") as DataBand;
+                if (dataBand != null)
+                {
+                    dataBand.DataSource = dataSource;
+                }
+
+                // 3. Barkod ve metin nesnelerini listenin alanlarına bağla
+                var barcode = report.FindObject("Barcode1") as FastReport.Barcode.BarcodeObject;
+                if (barcode != null)
+                {
+                    barcode.Expression = "[Urunler.BarkodNo]";
+                }
+
+                var txtUrun = report.FindObject("txtUrunAdi") as FastReport.TextObject;
+                if (txtUrun != null)
+                {
+                    txtUrun.Text = "[Urunler.UrunAdi]";
+                }
+
+                var txtFiyatObj = report.FindObject("txtFiyat") as FastReport.TextObject;
+                if (txtFiyatObj != null)
+                {
+                    txtFiyatObj.Text = "Fiyat: [Urunler.Fiyat] TL";
+                }
 
                 report.Show();
 
-                lblDurum.Text = $"Durum: {urunListesi.Count} farklı ürün etiketi hazırlandı.";
+                lblDurum.Text = $"Durum: {urunListesi.Count} farklı ürün etiketi başarıyla oluşturuldu.";
             }
         }
         catch (Exception ex)
