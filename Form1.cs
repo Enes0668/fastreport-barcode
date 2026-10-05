@@ -241,7 +241,12 @@ public partial class Form1 : Form
 
                 var barcode = report.FindObject(ReportObjectNames.Barcode) as FastReport.Barcode.BarcodeObject;
                 if (barcode != null)
+                {
                     barcode.Expression = $"[{ReportObjectNames.DataSourceName}.{ReportObjectNames.ParamBarkodNo}]";
+                    // Barkodun kutuya tam sığması için AutoSize açık + ortala:
+                    barcode.AutoSize  = true;
+                    barcode.HorzAlign = FastReport.Barcode.BarcodeObject.Alignment.Center;
+                }
 
                 var txtHasta = report.FindObject(ReportObjectNames.TextHastaAdi) as FastReport.TextObject;
                 if (txtHasta != null)
@@ -255,18 +260,20 @@ public partial class Form1 : Form
                 if (txtBolumObj != null)
                     txtBolumObj.Text = $"[{ReportObjectNames.DataSourceName}.{ReportObjectNames.ParamBolum}]";
 
+                // Sayfaları tam olarak derle (Prepare olmadan Zebra'ya yarım sayfa gidebilir!)
+                report.Prepare();
+
                 if (onizlemeGoster)
                 {
-                    report.Show();
+                    report.ShowPrepared();
                 }
                 else
                 {
-                    // Tamamen sessiz mod: Diyalog penceresi açılmaz, direkt seçili yazıcıya fırlar!
                     if (!string.IsNullOrWhiteSpace(SeciliYaziciAdi))
                         report.PrintSettings.Printer = SeciliYaziciAdi;
 
                     report.PrintSettings.ShowDialog = false;
-                    report.Print();
+                    report.PrintPrepared();
                 }
 
                 lblDurum.Text = $"Durum: {istekler.Count} adet barkod '{SeciliYaziciAdi}' yazıcısına başarıyla gönderildi.";
@@ -319,49 +326,57 @@ public partial class Form1 : Form
             page.Name = "EtiketSayfasi";
             page.PaperWidth  = 100;
             page.PaperHeight = 50;
-            page.LeftMargin   = 0;
-            page.RightMargin  = 0;
-            page.TopMargin    = 0;
-            page.BottomMargin = 0;
+            page.LeftMargin   = 2;  // Zebra termal kafasının ulaşamadığı kenar boşluğu
+            page.RightMargin  = 2;
+            page.TopMargin    = 2;
+            page.BottomMargin = 2;
 
             float mm = FastReport.Utils.Units.Millimeters;
 
             DataBand dataBand = new DataBand();
             dataBand.Name   = ReportObjectNames.DataBand;
-            dataBand.Height = mm * 50;
+            // DataBand yüksekliği sayfa yüksekliğinden (50mm) küçük olmalı!
+            // Aksi halde FastReport yeni sayfaya taşar ve Zebra sadece ilk parçayı basar.
+            dataBand.Height = mm * 46;
             page.Bands.Add(dataBand);
 
             FastReport.TextObject txtHasta = new FastReport.TextObject();
             txtHasta.Name      = ReportObjectNames.TextHastaAdi;
-            txtHasta.Bounds    = new System.Drawing.RectangleF(mm * 3, mm * 2, mm * 94, mm * 8);
-            txtHasta.Font      = new System.Drawing.Font("Arial", 11, System.Drawing.FontStyle.Bold);
+            txtHasta.Bounds    = new System.Drawing.RectangleF(mm * 2, mm * 1, mm * 92, mm * 7);
+            txtHasta.Font      = new System.Drawing.Font("Arial", 10, System.Drawing.FontStyle.Bold);
             txtHasta.HorzAlign = FastReport.HorzAlign.Center;
+            txtHasta.VertAlign = FastReport.VertAlign.Center;
             txtHasta.Text      = $"[{ReportObjectNames.ParamHastaAdi}]";
             dataBand.Objects.Add(txtHasta);
 
             FastReport.Barcode.BarcodeObject barcode = new FastReport.Barcode.BarcodeObject();
-            barcode.Name       = ReportObjectNames.Barcode;
-            barcode.Bounds     = new System.Drawing.RectangleF(mm * 3, mm * 11, mm * 94, mm * 24);
-            barcode.Barcode    = new FastReport.Barcode.Barcode128();
-            barcode.AutoSize   = false;
-            barcode.ShowText   = true;
+            barcode.Name      = ReportObjectNames.Barcode;
+            barcode.Bounds    = new System.Drawing.RectangleF(mm * 5, mm * 9, mm * 86, mm * 24);
+            barcode.Barcode   = new FastReport.Barcode.Barcode128();
+            // AutoSize=true: Barkod çizgileri kutunun içine tam sığar, taşmaz, kesilmez!
+            barcode.AutoSize  = true;
+            barcode.ShowText  = true;
+            barcode.HorzAlign = FastReport.Barcode.BarcodeObject.Alignment.Center;
             barcode.Expression = $"[{ReportObjectNames.ParamBarkodNo}]";
             dataBand.Objects.Add(barcode);
 
             FastReport.TextObject txtProtokol = new FastReport.TextObject();
-            txtProtokol.Name   = ReportObjectNames.TextProtokolNo;
-            txtProtokol.Bounds = new System.Drawing.RectangleF(mm * 3, mm * 36, mm * 45, mm * 6);
-            txtProtokol.Font   = new System.Drawing.Font("Arial", 9, System.Drawing.FontStyle.Bold);
-            txtProtokol.Text   = $"Prot: [{ReportObjectNames.ParamProtokolNo}]";
+            txtProtokol.Name      = ReportObjectNames.TextProtokolNo;
+            txtProtokol.Bounds    = new System.Drawing.RectangleF(mm * 2, mm * 34, mm * 45, mm * 6);
+            txtProtokol.Font      = new System.Drawing.Font("Arial", 9, System.Drawing.FontStyle.Bold);
+            txtProtokol.VertAlign = FastReport.VertAlign.Center;
+            txtProtokol.Text      = $"Prot: [{ReportObjectNames.ParamProtokolNo}]";
             dataBand.Objects.Add(txtProtokol);
 
             FastReport.TextObject txtBolumObj = new FastReport.TextObject();
             txtBolumObj.Name       = ReportObjectNames.TextBolum;
-            txtBolumObj.Bounds     = new System.Drawing.RectangleF(mm * 48, mm * 36, mm * 49, mm * 6);
+            txtBolumObj.Bounds     = new System.Drawing.RectangleF(mm * 48, mm * 34, mm * 46, mm * 6);
             txtBolumObj.Font       = new System.Drawing.Font("Arial", 9, System.Drawing.FontStyle.Regular);
             txtBolumObj.HorzAlign  = FastReport.HorzAlign.Right;
+            txtBolumObj.VertAlign  = FastReport.VertAlign.Center;
             txtBolumObj.Text       = $"[{ReportObjectNames.ParamBolum}]";
             dataBand.Objects.Add(txtBolumObj);
+
 
             report.Parameters.Add(new FastReport.Data.Parameter(ReportObjectNames.ParamBarkodNo)   { DataType = typeof(string), Value = string.Empty });
             report.Parameters.Add(new FastReport.Data.Parameter(ReportObjectNames.ParamHastaAdi)   { DataType = typeof(string), Value = string.Empty });
