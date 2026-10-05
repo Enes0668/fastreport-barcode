@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using System.Windows.Forms;
 using FastReport;
 using Microsoft.AspNetCore.SignalR.Client;
+using Microsoft.Extensions.Configuration;
 
 namespace FastReportBarcodeApp;
 
@@ -13,22 +14,43 @@ public partial class Form1 : Form
     private readonly string sablonYolu = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "etiket_sablonu.frx");
     private HubConnection? hubConnection;
 
+    // Config değerleri appsettings.json'dan okunur
+    private readonly string hubUrl;
+    private readonly string printerName;
+    private readonly bool silentPrint;
+    private readonly int bulkPrintCount;
+
     public Form1()
     {
         InitializeComponent();
+        var config = LoadConfiguration();
+        hubUrl         = config["SignalR:HubUrl"]      ?? "http://localhost:5000/barkodHub";
+        printerName    = config["Printer:Name"]        ?? string.Empty;
+        silentPrint    = bool.TryParse(config["Printer:SilentPrint"], out bool sp) && sp;
+        bulkPrintCount = int.TryParse(config["BulkPrint:Count"],     out int bc) ? bc : 10;
+
         VarsayilanSablonOlustur();
-        SignalRBaslat();
+        _ = SignalRBaslat();
     }
 
     /// <summary>
-    /// SignalR istemcisini başlatır. Gerçek bir SignalR Hub adresi verildiğinde canlı bağlanır.
+    /// appsettings.json'u yükler.
     /// </summary>
-    private async void SignalRBaslat()
+    private static IConfiguration LoadConfiguration()
+    {
+        return new ConfigurationBuilder()
+            .SetBasePath(AppDomain.CurrentDomain.BaseDirectory)
+            .AddJsonFile("appsettings.json", optional: true, reloadOnChange: false)
+            .Build();
+    }
+
+    /// <summary>
+    /// SignalR istemcisini başlatır. Hub adresi appsettings.json üzerinden gelir.
+    /// </summary>
+    private async Task SignalRBaslat()
     {
         try
         {
-            string hubUrl = "http://localhost:5000/barkodHub";
-
             hubConnection = new HubConnectionBuilder()
                 .WithUrl(hubUrl)
                 .WithAutomaticReconnect()
@@ -39,12 +61,12 @@ public partial class Form1 : Form
             {
                 this.Invoke((MethodInvoker)delegate
                 {
-                    EtiketiDogrudanYazdir(istek.BarkodNo, istek.HastaAdi, istek.ProtokolNo, istek.Bolum, onizlemeGoster: true);
+                    EtiketiDogrudanYazdir(istek.BarkodNo, istek.HastaAdi, istek.ProtokolNo, istek.Bolum, onizlemeGoster: !silentPrint);
                 });
             });
 
             await hubConnection.StartAsync();
-            lblSignalRStatus.Text = "📡 Durum: SignalR Hub'a bağlı. Web emri bekleniyor.";
+            lblSignalRStatus.Text = $"📡 Durum: SignalR Hub'a bağlı. ({hubUrl})";
         }
         catch
         {
@@ -54,6 +76,7 @@ public partial class Form1 : Form
 
     /// <summary>
     /// Hastane etiket standardına uygun (100mm x 50mm) temiz başlangıç şablonu oluşturur.
+    /// Parametre varsayılan değerleri boş bırakılır; gerçek veriler yazdırma sırasında enjekte edilir.
     /// </summary>
     private void VarsayilanSablonOlustur()
     {
@@ -63,62 +86,62 @@ public partial class Form1 : Form
         {
             ReportPage page = new ReportPage();
             page.Name = "EtiketSayfasi";
-            page.PaperWidth = 100;
+            page.PaperWidth  = 100;
             page.PaperHeight = 50;
-            page.LeftMargin = 0;
-            page.RightMargin = 0;
-            page.TopMargin = 0;
+            page.LeftMargin   = 0;
+            page.RightMargin  = 0;
+            page.TopMargin    = 0;
             page.BottomMargin = 0;
 
             float mm = FastReport.Utils.Units.Millimeters;
 
             // DataBand
             DataBand dataBand = new DataBand();
-            dataBand.Name = "Data1";
+            dataBand.Name   = ReportObjectNames.DataBand;
             dataBand.Height = mm * 50;
             page.Bands.Add(dataBand);
 
             // 1. Hasta Adı
             FastReport.TextObject txtHasta = new FastReport.TextObject();
-            txtHasta.Name = "txtHastaAdi";
-            txtHasta.Bounds = new System.Drawing.RectangleF(mm * 3, mm * 2, mm * 94, mm * 8);
-            txtHasta.Font = new System.Drawing.Font("Arial", 11, System.Drawing.FontStyle.Bold);
+            txtHasta.Name      = ReportObjectNames.TextHastaAdi;
+            txtHasta.Bounds    = new System.Drawing.RectangleF(mm * 3, mm * 2, mm * 94, mm * 8);
+            txtHasta.Font      = new System.Drawing.Font("Arial", 11, System.Drawing.FontStyle.Bold);
             txtHasta.HorzAlign = FastReport.HorzAlign.Center;
-            txtHasta.Text = "[HastaAdi]";
+            txtHasta.Text      = $"[{ReportObjectNames.ParamHastaAdi}]";
             dataBand.Objects.Add(txtHasta);
 
             // 2. Barkod (Code128)
             FastReport.Barcode.BarcodeObject barcode = new FastReport.Barcode.BarcodeObject();
-            barcode.Name = "Barcode1";
-            barcode.Bounds = new System.Drawing.RectangleF(mm * 3, mm * 11, mm * 94, mm * 24);
-            barcode.Barcode = new FastReport.Barcode.Barcode128();
-            barcode.AutoSize = false;
-            barcode.ShowText = true;
-            barcode.Expression = "[BarkodNo]";
+            barcode.Name       = ReportObjectNames.Barcode;
+            barcode.Bounds     = new System.Drawing.RectangleF(mm * 3, mm * 11, mm * 94, mm * 24);
+            barcode.Barcode    = new FastReport.Barcode.Barcode128();
+            barcode.AutoSize   = false;
+            barcode.ShowText   = true;
+            barcode.Expression = $"[{ReportObjectNames.ParamBarkodNo}]";
             dataBand.Objects.Add(barcode);
 
             // 3. Protokol No
             FastReport.TextObject txtProtokol = new FastReport.TextObject();
-            txtProtokol.Name = "txtProtokolNo";
+            txtProtokol.Name   = ReportObjectNames.TextProtokolNo;
             txtProtokol.Bounds = new System.Drawing.RectangleF(mm * 3, mm * 36, mm * 45, mm * 6);
-            txtProtokol.Font = new System.Drawing.Font("Arial", 9, System.Drawing.FontStyle.Bold);
-            txtProtokol.Text = "Prot: [ProtokolNo]";
+            txtProtokol.Font   = new System.Drawing.Font("Arial", 9, System.Drawing.FontStyle.Bold);
+            txtProtokol.Text   = $"Prot: [{ReportObjectNames.ParamProtokolNo}]";
             dataBand.Objects.Add(txtProtokol);
 
             // 4. Bölüm / Poliklinik
             FastReport.TextObject txtBolumObj = new FastReport.TextObject();
-            txtBolumObj.Name = "txtBolum";
-            txtBolumObj.Bounds = new System.Drawing.RectangleF(mm * 48, mm * 36, mm * 49, mm * 6);
-            txtBolumObj.Font = new System.Drawing.Font("Arial", 9, System.Drawing.FontStyle.Regular);
-            txtBolumObj.HorzAlign = FastReport.HorzAlign.Right;
-            txtBolumObj.Text = "[Bolum]";
+            txtBolumObj.Name       = ReportObjectNames.TextBolum;
+            txtBolumObj.Bounds     = new System.Drawing.RectangleF(mm * 48, mm * 36, mm * 49, mm * 6);
+            txtBolumObj.Font       = new System.Drawing.Font("Arial", 9, System.Drawing.FontStyle.Regular);
+            txtBolumObj.HorzAlign  = FastReport.HorzAlign.Right;
+            txtBolumObj.Text       = $"[{ReportObjectNames.ParamBolum}]";
             dataBand.Objects.Add(txtBolumObj);
 
-            // Parametreler
-            report.Parameters.Add(new FastReport.Data.Parameter("BarkodNo") { DataType = typeof(string), Value = "8690123456789" });
-            report.Parameters.Add(new FastReport.Data.Parameter("HastaAdi") { DataType = typeof(string), Value = "Ahmet Yılmaz" });
-            report.Parameters.Add(new FastReport.Data.Parameter("ProtokolNo") { DataType = typeof(string), Value = "2026-98451" });
-            report.Parameters.Add(new FastReport.Data.Parameter("Bolum") { DataType = typeof(string), Value = "Acil Poliklinik" });
+            // Parametreler — varsayılan değerler boş; gerçek veri runtime'da enjekte edilir
+            report.Parameters.Add(new FastReport.Data.Parameter(ReportObjectNames.ParamBarkodNo)   { DataType = typeof(string), Value = string.Empty });
+            report.Parameters.Add(new FastReport.Data.Parameter(ReportObjectNames.ParamHastaAdi)   { DataType = typeof(string), Value = string.Empty });
+            report.Parameters.Add(new FastReport.Data.Parameter(ReportObjectNames.ParamProtokolNo) { DataType = typeof(string), Value = string.Empty });
+            report.Parameters.Add(new FastReport.Data.Parameter(ReportObjectNames.ParamBolum)      { DataType = typeof(string), Value = string.Empty });
 
             report.Pages.Add(page);
             report.Save(sablonYolu);
@@ -137,10 +160,10 @@ public partial class Form1 : Form
                 if (File.Exists(sablonYolu))
                     report.Load(sablonYolu);
 
-                report.SetParameterValue("BarkodNo", txtBarkod.Text);
-                report.SetParameterValue("HastaAdi", txtHastaAdi.Text);
-                report.SetParameterValue("ProtokolNo", txtProtokolNo.Text);
-                report.SetParameterValue("Bolum", txtBolum.Text);
+                report.SetParameterValue(ReportObjectNames.ParamBarkodNo,   txtBarkod.Text);
+                report.SetParameterValue(ReportObjectNames.ParamHastaAdi,   txtHastaAdi.Text);
+                report.SetParameterValue(ReportObjectNames.ParamProtokolNo, txtProtokolNo.Text);
+                report.SetParameterValue(ReportObjectNames.ParamBolum,      txtBolum.Text);
 
                 report.Design();
 
@@ -154,7 +177,7 @@ public partial class Form1 : Form
     }
 
     /// <summary>
-    /// Manuel Buton: Formdaki değerlerle önizleme açar
+    /// Manuel Buton: Formdaki değerlerle önizleme açar.
     /// </summary>
     private void btnYazdirTekli_Click(object sender, EventArgs e)
     {
@@ -167,30 +190,30 @@ public partial class Form1 : Form
     }
 
     /// <summary>
-    /// SİMÜLASYON BUTONU:
-    /// "Web'den HBYS JSON isteği gelince anında böyle basıyor" demek için!
+    /// SİMÜLASYON BUTONU: Formdaki mevcut değerleri SignalR'dan gelmiş gibi işler.
+    /// Test verisi hardcode yerine form alanlarından okunur.
     /// </summary>
     private void btnSignalRSimule_Click(object sender, EventArgs e)
     {
-        var gelenJson = new BarkodIstekModel
+        var simuleIstek = new BarkodIstekModel
         {
-            BarkodNo = "998877665544",
-            HastaAdi = "Ayşe Kaya",
-            ProtokolNo = "2026-00451",
-            Bolum = "Dahiliye - Kan Alma"
+            BarkodNo   = txtBarkod.Text.Trim(),
+            HastaAdi   = txtHastaAdi.Text.Trim(),
+            ProtokolNo = txtProtokolNo.Text.Trim(),
+            Bolum      = txtBolum.Text.Trim()
         };
 
         EtiketiDogrudanYazdir(
-            gelenJson.BarkodNo,
-            gelenJson.HastaAdi,
-            gelenJson.ProtokolNo,
-            gelenJson.Bolum,
-            onizlemeGoster: true);
+            simuleIstek.BarkodNo,
+            simuleIstek.HastaAdi,
+            simuleIstek.ProtokolNo,
+            simuleIstek.Bolum,
+            onizlemeGoster: !silentPrint);
 
         MessageBox.Show(
             $"SignalR Web İsteği Simüle Edildi!\n\n" +
-            $"Gelen Veri:\nHasta: {gelenJson.HastaAdi}\nProtokol: {gelenJson.ProtokolNo}\nBölüm: {gelenJson.Bolum}\nBarkod: {gelenJson.BarkodNo}\n\n" +
-            $"Bu istek doğrudan USB barkod yazıcıya fırlatıldı!",
+            $"Gelen Veri:\nHasta: {simuleIstek.HastaAdi}\nProtokol: {simuleIstek.ProtokolNo}\nBölüm: {simuleIstek.Bolum}\nBarkod: {simuleIstek.BarkodNo}\n\n" +
+            $"Bu istek '{printerName}' yazıcısına fırlatıldı!",
             "SignalR Entegrasyon Başarılı",
             MessageBoxButtons.OK,
             MessageBoxIcon.Information);
@@ -198,6 +221,7 @@ public partial class Form1 : Form
 
     /// <summary>
     /// Tüm yazdırma işlemlerinin geçtiği çekirdek metod.
+    /// Yazıcı adı ve sessiz baskı ayarı appsettings.json üzerinden okunur.
     /// </summary>
     private void EtiketiDogrudanYazdir(string barkodNo, string hastaAdi, string protokolNo, string bolum, bool onizlemeGoster)
     {
@@ -213,21 +237,22 @@ public partial class Form1 : Form
             {
                 report.Load(sablonYolu);
 
-                // 1. HBYS'den gelen verileri şablondaki parametrelere aktar
-                report.SetParameterValue("BarkodNo", barkodNo);
-                report.SetParameterValue("HastaAdi", hastaAdi);
-                report.SetParameterValue("ProtokolNo", protokolNo);
-                report.SetParameterValue("Bolum", bolum);
+                // HBYS'den gelen verileri şablondaki parametrelere aktar
+                report.SetParameterValue(ReportObjectNames.ParamBarkodNo,   barkodNo);
+                report.SetParameterValue(ReportObjectNames.ParamHastaAdi,   hastaAdi);
+                report.SetParameterValue(ReportObjectNames.ParamProtokolNo, protokolNo);
+                report.SetParameterValue(ReportObjectNames.ParamBolum,      bolum);
 
-                // 2. Baskıyı gerçekleştir
                 if (onizlemeGoster)
                 {
                     report.Show();
                 }
                 else
                 {
-                    // Canlı hastane ortamında arka planda sessizce (silent) yazıcıya basmak için:
-                    // report.PrintSettings.Printer = "Zebra ZD420";
+                    // Yazıcı adı appsettings.json → Printer:Name'den gelir
+                    if (!string.IsNullOrWhiteSpace(printerName))
+                        report.PrintSettings.Printer = printerName;
+
                     report.PrintSettings.ShowDialog = false;
                     report.Print();
                 }
@@ -242,21 +267,23 @@ public partial class Form1 : Form
     }
 
     /// <summary>
-    /// TOPLU ETİKET BASMA: 10 farklı kan tüpü etiketi üretir
+    /// TOPLU ETİKET BASMA: Numune listesi appsettings.json → BulkPrint:Count kadar üretilir.
+    /// Gerçek projede bu liste DB veya HBYS API'sından sağlanmalıdır.
     /// </summary>
     private void btnYazdirToplu_Click(object sender, EventArgs e)
     {
         try
         {
+            // TODO (Gerçek Uygulama): numuneListesi DB veya HBYS API'sından doldurulmalıdır.
             var numuneListesi = new List<NumuneModel>();
-            for (int i = 1; i <= 10; i++)
+            for (int i = 1; i <= bulkPrintCount; i++)
             {
                 numuneListesi.Add(new NumuneModel
                 {
-                    BarkodNo = $"869000000{i:D4}",
-                    HastaAdi = $"Hasta #{i} - Mehmet Öz",
-                    ProtokolNo = $"2026-900{i}",
-                    Bolum = $"Tüp #{i} (Biyokimya)"
+                    BarkodNo   = $"{txtBarkod.Text.Trim()}-{i:D3}",
+                    HastaAdi   = txtHastaAdi.Text.Trim(),
+                    ProtokolNo = $"{txtProtokolNo.Text.Trim()}-{i:D3}",
+                    Bolum      = $"{txtBolum.Text.Trim()} / Tüp #{i}"
                 });
             }
 
@@ -264,29 +291,29 @@ public partial class Form1 : Form
             {
                 report.Load(sablonYolu);
 
-                report.RegisterData(numuneListesi, "Numuneler");
-                var dataSource = report.GetDataSource("Numuneler");
+                report.RegisterData(numuneListesi, ReportObjectNames.DataSourceName);
+                var dataSource = report.GetDataSource(ReportObjectNames.DataSourceName);
                 dataSource.Enabled = true;
 
-                var dataBand = report.FindObject("Data1") as DataBand;
+                var dataBand = report.FindObject(ReportObjectNames.DataBand) as DataBand;
                 if (dataBand != null)
                     dataBand.DataSource = dataSource;
 
-                var barcode = report.FindObject("Barcode1") as FastReport.Barcode.BarcodeObject;
+                var barcode = report.FindObject(ReportObjectNames.Barcode) as FastReport.Barcode.BarcodeObject;
                 if (barcode != null)
-                    barcode.Expression = "[Numuneler.BarkodNo]";
+                    barcode.Expression = $"[{ReportObjectNames.DataSourceName}.{ReportObjectNames.ParamBarkodNo}]";
 
-                var txtHasta = report.FindObject("txtHastaAdi") as FastReport.TextObject;
+                var txtHasta = report.FindObject(ReportObjectNames.TextHastaAdi) as FastReport.TextObject;
                 if (txtHasta != null)
-                    txtHasta.Text = "[Numuneler.HastaAdi]";
+                    txtHasta.Text = $"[{ReportObjectNames.DataSourceName}.{ReportObjectNames.ParamHastaAdi}]";
 
-                var txtProtokol = report.FindObject("txtProtokolNo") as FastReport.TextObject;
+                var txtProtokol = report.FindObject(ReportObjectNames.TextProtokolNo) as FastReport.TextObject;
                 if (txtProtokol != null)
-                    txtProtokol.Text = "Prot: [Numuneler.ProtokolNo]";
+                    txtProtokol.Text = $"Prot: [{ReportObjectNames.DataSourceName}.{ReportObjectNames.ParamProtokolNo}]";
 
-                var txtBolumObj = report.FindObject("txtBolum") as FastReport.TextObject;
+                var txtBolumObj = report.FindObject(ReportObjectNames.TextBolum) as FastReport.TextObject;
                 if (txtBolumObj != null)
-                    txtBolumObj.Text = "[Numuneler.Bolum]";
+                    txtBolumObj.Text = $"[{ReportObjectNames.DataSourceName}.{ReportObjectNames.ParamBolum}]";
 
                 report.Show();
 
@@ -302,16 +329,16 @@ public partial class Form1 : Form
 
 public class BarkodIstekModel
 {
-    public string BarkodNo { get; set; } = string.Empty;
-    public string HastaAdi { get; set; } = string.Empty;
+    public string BarkodNo   { get; set; } = string.Empty;
+    public string HastaAdi   { get; set; } = string.Empty;
     public string ProtokolNo { get; set; } = string.Empty;
-    public string Bolum { get; set; } = string.Empty;
+    public string Bolum      { get; set; } = string.Empty;
 }
 
 public class NumuneModel
 {
-    public string BarkodNo { get; set; } = string.Empty;
-    public string HastaAdi { get; set; } = string.Empty;
+    public string BarkodNo   { get; set; } = string.Empty;
+    public string HastaAdi   { get; set; } = string.Empty;
     public string ProtokolNo { get; set; } = string.Empty;
-    public string Bolum { get; set; } = string.Empty;
+    public string Bolum      { get; set; } = string.Empty;
 }

@@ -96,7 +96,7 @@ partial class Form1
         txtBarkod.Name = "txtBarkod";
         txtBarkod.Size = new Size(280, 27);
         txtBarkod.TabIndex = 1;
-        txtBarkod.Text = "8690123456789";
+        txtBarkod.Text = string.Empty;
         // 
         // lblHastaAdi
         // 
@@ -113,7 +113,7 @@ partial class Form1
         txtHastaAdi.Name = "txtHastaAdi";
         txtHastaAdi.Size = new Size(280, 27);
         txtHastaAdi.TabIndex = 3;
-        txtHastaAdi.Text = "Ahmet Yılmaz";
+        txtHastaAdi.Text = string.Empty;
         // 
         // lblProtokolNo
         // 
@@ -130,7 +130,7 @@ partial class Form1
         txtProtokolNo.Name = "txtProtokolNo";
         txtProtokolNo.Size = new Size(280, 27);
         txtProtokolNo.TabIndex = 5;
-        txtProtokolNo.Text = "2026-98451";
+        txtProtokolNo.Text = string.Empty;
         // 
         // lblBolum
         // 
@@ -147,7 +147,7 @@ partial class Form1
         txtBolum.Name = "txtBolum";
         txtBolum.Size = new Size(280, 27);
         txtBolum.TabIndex = 7;
-        txtBolum.Text = "Acil Poliklinik - Kan Alma";
+        txtBolum.Text = string.Empty;
         // 
         // btnYazdirTekli
         // 
