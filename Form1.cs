@@ -1,9 +1,12 @@
 using System;
 using System.Collections.Generic;
+using System.Drawing.Printing;
 using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using FastReport;
+using FastReport.Data;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Configuration;
 
@@ -14,28 +17,69 @@ public partial class Form1 : Form
     private readonly string sablonYolu = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "etiket_sablonu.frx");
     private HubConnection? hubConnection;
 
-    // Config değerleri appsettings.json'dan okunur
+    // Config değerleri
     private readonly string hubUrl;
-    private readonly string printerName;
-    private readonly bool silentPrint;
+    private readonly string postgresConnectionString;
+    private readonly bool defaultSilentPrint;
     private readonly int bulkPrintCount;
 
     public Form1()
     {
         InitializeComponent();
-        var config = LoadConfiguration();
-        hubUrl         = config["SignalR:HubUrl"]      ?? "http://localhost:5000/barkodHub";
-        printerName    = config["Printer:Name"]        ?? string.Empty;
-        silentPrint    = bool.TryParse(config["Printer:SilentPrint"], out bool sp) && sp;
-        bulkPrintCount = int.TryParse(config["BulkPrint:Count"],     out int bc) ? bc : 10;
 
+        // FastReport Tasarımcısında ve Motorunda PostgreSQL veri sağlayıcısını aktif et:
+        FastReport.Utils.RegisteredObjects.AddConnection(typeof(PostgresDataConnection));
+
+        var config = LoadConfiguration();
+        hubUrl                   = config["SignalR:HubUrl"]                          ?? "http://localhost:5000/barkodHub";
+        postgresConnectionString = config["ConnectionStrings:PostgreSql"]            ?? string.Empty;
+        defaultSilentPrint       = bool.TryParse(config["Printer:SilentPrint"], out bool sp) && sp;
+        bulkPrintCount           = int.TryParse(config["BulkPrint:Count"],     out int bc) ? bc : 10;
+
+        YazicilariYukle(config["Printer:Name"]);
         VarsayilanSablonOlustur();
         _ = SignalRBaslat();
     }
 
     /// <summary>
-    /// appsettings.json'u yükler.
+    /// Bilgisayarda kurulu olan tüm yazıcıları tarar ve ComboBox'a yükler.
     /// </summary>
+    private void YazicilariYukle(string? configYaziciAdi)
+    {
+        cmbYazicilar.Items.Clear();
+
+        string varsayilanYazici = string.Empty;
+        try
+        {
+            var printDoc = new PrintDocument();
+            varsayilanYazici = printDoc.PrinterSettings.PrinterName;
+        }
+        catch { }
+
+        foreach (string printer in PrinterSettings.InstalledPrinters)
+        {
+            cmbYazicilar.Items.Add(printer);
+        }
+
+        if (cmbYazicilar.Items.Count > 0)
+        {
+            if (!string.IsNullOrWhiteSpace(configYaziciAdi) && cmbYazicilar.Items.Contains(configYaziciAdi))
+            {
+                cmbYazicilar.SelectedItem = configYaziciAdi;
+            }
+            else if (!string.IsNullOrWhiteSpace(varsayilanYazici) && cmbYazicilar.Items.Contains(varsayilanYazici))
+            {
+                cmbYazicilar.SelectedItem = varsayilanYazici;
+            }
+            else
+            {
+                cmbYazicilar.SelectedIndex = 0;
+            }
+        }
+    }
+
+    private string SeciliYaziciAdi => cmbYazicilar.SelectedItem?.ToString() ?? string.Empty;
+
     private static IConfiguration LoadConfiguration()
     {
         return new ConfigurationBuilder()
@@ -45,7 +89,10 @@ public partial class Form1 : Form
     }
 
     /// <summary>
-    /// SignalR istemcisini başlatır. Hub adresi appsettings.json üzerinden gelir.
+    /// SignalR dinleyicisini başlatır.
+    /// 1. Tekli barkod emri
+    /// 2. N adet liste barkod emri
+    /// 3. PostgreSQL üzerinden sorguyla N adet barkod emri (IstekId / ProtokolNo ile)
     /// </summary>
     private async Task SignalRBaslat()
     {
@@ -56,27 +103,45 @@ public partial class Form1 : Form
                 .WithAutomaticReconnect()
                 .Build();
 
-            // Web'den "BarkodYazdir" emri geldiğinde tetiklenecek fonksiyon:
+            // 1. Dışarıdan TEKLİ doğrudan veri emri geldiğinde:
             hubConnection.On<BarkodIstekModel>("BarkodYazdir", (istek) =>
             {
                 this.Invoke((MethodInvoker)delegate
                 {
-                    EtiketiDogrudanYazdir(istek.BarkodNo, istek.HastaAdi, istek.ProtokolNo, istek.Bolum, onizlemeGoster: !silentPrint);
+                    EtiketiDogrudanYazdir(istek.BarkodNo, istek.HastaAdi, istek.ProtokolNo, istek.Bolum, onizlemeGoster: !defaultSilentPrint);
+                });
+            });
+
+            // 2. Dışarıdan N ADET (TOPLU LİSTE) veri emri geldiğinde:
+            hubConnection.On<List<BarkodIstekModel>>("BarkodYazdirToplu", (istekListesi) =>
+            {
+                this.Invoke((MethodInvoker)delegate
+                {
+                    TopluEtiketleriYazdir(istekListesi, onizlemeGoster: !defaultSilentPrint);
+                });
+            });
+
+            // 3. POSTGRESQL SORGUSUYLA YAZDIRMA EMRİ (FastReport içinden SQL atar):
+            // HBYS sadece bir IstekId / ProtokolNo gönderir, FastReport Postgres'ten N adet satırı kendi çeker!
+            hubConnection.On<string>("PostgresBarkodYazdir", (parametreDegeri) =>
+            {
+                this.Invoke((MethodInvoker)delegate
+                {
+                    EtiketiPostgresIleYazdir(parametreDegeri, onizlemeGoster: !defaultSilentPrint);
                 });
             });
 
             await hubConnection.StartAsync();
-            lblSignalRStatus.Text = $"📡 Durum: SignalR Hub'a bağlı. ({hubUrl})";
+            lblSignalRStatus.Text = $"📡 Durum: Dinleyici bağlı. ({hubUrl})";
         }
         catch
         {
-            lblSignalRStatus.Text = "📡 Durum: Dinleyici aktif (Simülasyon butonu ile test edilebilir).";
+            lblSignalRStatus.Text = "📡 Durum: SignalR arka planda dinlemede.";
         }
     }
 
     /// <summary>
-    /// Hastane etiket standardına uygun (100mm x 50mm) temiz başlangıç şablonu oluşturur.
-    /// Parametre varsayılan değerleri boş bırakılır; gerçek veriler yazdırma sırasında enjekte edilir.
+    /// Başlangıç şablonu oluşturur.
     /// </summary>
     private void VarsayilanSablonOlustur()
     {
@@ -95,7 +160,6 @@ public partial class Form1 : Form
 
             float mm = FastReport.Utils.Units.Millimeters;
 
-            // DataBand
             DataBand dataBand = new DataBand();
             dataBand.Name   = ReportObjectNames.DataBand;
             dataBand.Height = mm * 50;
@@ -137,7 +201,7 @@ public partial class Form1 : Form
             txtBolumObj.Text       = $"[{ReportObjectNames.ParamBolum}]";
             dataBand.Objects.Add(txtBolumObj);
 
-            // Parametreler — varsayılan değerler boş; gerçek veri runtime'da enjekte edilir
+            // Parametreler
             report.Parameters.Add(new FastReport.Data.Parameter(ReportObjectNames.ParamBarkodNo)   { DataType = typeof(string), Value = string.Empty });
             report.Parameters.Add(new FastReport.Data.Parameter(ReportObjectNames.ParamHastaAdi)   { DataType = typeof(string), Value = string.Empty });
             report.Parameters.Add(new FastReport.Data.Parameter(ReportObjectNames.ParamProtokolNo) { DataType = typeof(string), Value = string.Empty });
@@ -149,7 +213,8 @@ public partial class Form1 : Form
     }
 
     /// <summary>
-    /// SÜRÜKLE-BIRAK TASARIMCIYI AÇAR (report.Design())
+    /// Sürükle-Bırak Tasarımcıyı Açar.
+    /// FastReport Tasarımcısında Data -> Add Data Source -> PostgreSQL Connection eklenerek doğrudan sorgu bağlanabilir.
     /// </summary>
     private void btnTasarla_Click(object sender, EventArgs e)
     {
@@ -159,6 +224,9 @@ public partial class Form1 : Form
             {
                 if (File.Exists(sablonYolu))
                     report.Load(sablonYolu);
+
+                // Eğer şablonda kayıtlı bir Postgres bağlantısı varsa, appsettings'deki güncel connection string ile besle
+                PostgresBaglantisiniGuncelle(report);
 
                 report.SetParameterValue(ReportObjectNames.ParamBarkodNo,   txtBarkod.Text);
                 report.SetParameterValue(ReportObjectNames.ParamHastaAdi,   txtHastaAdi.Text);
@@ -177,7 +245,65 @@ public partial class Form1 : Form
     }
 
     /// <summary>
-    /// Manuel Buton: Formdaki değerlerle önizleme açar.
+    /// Şablondaki DataConnection'ların ConnectionString'ini appsettings.json'dan dinamik olarak günceller.
+    /// Böylece veritabanı şifresi veya sunucu IP'si değiştiğinde .frx dosyasını baştan tasarlamak gerekmez!
+    /// </summary>
+    private void PostgresBaglantisiniGuncelle(Report report)
+    {
+        if (string.IsNullOrWhiteSpace(postgresConnectionString)) return;
+
+        foreach (DataConnectionBase conn in report.Dictionary.Connections)
+        {
+            if (conn is PostgresDataConnection || conn.GetType().Name.Contains("Postgres"))
+            {
+                conn.ConnectionString = postgresConnectionString;
+            }
+        }
+    }
+
+    /// <summary>
+    /// POSTGRESQL ENTEGRELİ BASKI METODU:
+    /// FastReport'un KENDİ İÇİNDEN PostgreSQL'e sorgu atmasını sağlar!
+    /// HBYS sadece bir IstekId / ProtokolNo verir; FastReport N adet barkodu Postgres'ten çeker ve seçili yazıcıya basar.
+    /// </summary>
+    public void EtiketiPostgresIleYazdir(string filtreDegeri, bool onizlemeGoster)
+    {
+        try
+        {
+            using (Report report = new Report())
+            {
+                report.Load(sablonYolu);
+
+                PostgresBaglantisiniGuncelle(report);
+
+                // FastReport şablonunda tanımlı olan @IstekId veya @ProtokolNo parametresini ayarla
+                report.SetParameterValue("IstekId", filtreDegeri);
+                report.SetParameterValue("ProtokolNo", filtreDegeri);
+
+                if (onizlemeGoster)
+                {
+                    report.Show();
+                }
+                else
+                {
+                    if (!string.IsNullOrWhiteSpace(SeciliYaziciAdi))
+                        report.PrintSettings.Printer = SeciliYaziciAdi;
+
+                    report.PrintSettings.ShowDialog = false;
+                    report.Print();
+                }
+
+                lblDurum.Text = $"Durum: PostgreSQL sorgusu çalıştırıldı -> '{SeciliYaziciAdi}' yazıcısına basıldı.";
+            }
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show("PostgreSQL ile yazdırma hatası: " + ex.Message, "Hata", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    /// <summary>
+    /// Formdaki değerlerle tekli test.
     /// </summary>
     private void btnYazdirTekli_Click(object sender, EventArgs e)
     {
@@ -190,38 +316,35 @@ public partial class Form1 : Form
     }
 
     /// <summary>
-    /// SİMÜLASYON BUTONU: Formdaki mevcut değerleri SignalR'dan gelmiş gibi işler.
-    /// Test verisi hardcode yerine form alanlarından okunur.
+    /// SİMÜLASYON: N Adet Barkod Emri Simülasyonu
     /// </summary>
     private void btnSignalRSimule_Click(object sender, EventArgs e)
     {
-        var simuleIstek = new BarkodIstekModel
+        string barkod = string.IsNullOrWhiteSpace(txtBarkod.Text) ? "869012345001" : txtBarkod.Text.Trim();
+        string hasta = string.IsNullOrWhiteSpace(txtHastaAdi.Text) ? "Ayşe Kaya" : txtHastaAdi.Text.Trim();
+        string protokol = string.IsNullOrWhiteSpace(txtProtokolNo.Text) ? "2026-00451" : txtProtokolNo.Text.Trim();
+        string bolum = string.IsNullOrWhiteSpace(txtBolum.Text) ? "Dahiliye" : txtBolum.Text.Trim();
+
+        var ornekListe = new List<BarkodIstekModel>
         {
-            BarkodNo   = txtBarkod.Text.Trim(),
-            HastaAdi   = txtHastaAdi.Text.Trim(),
-            ProtokolNo = txtProtokolNo.Text.Trim(),
-            Bolum      = txtBolum.Text.Trim()
+            new() { BarkodNo = $"{barkod}-01", HastaAdi = hasta, ProtokolNo = protokol, Bolum = $"{bolum} (Biyokimya Tüpü)" },
+            new() { BarkodNo = $"{barkod}-02", HastaAdi = hasta, ProtokolNo = protokol, Bolum = $"{bolum} (Hemogram Tüpü)" },
+            new() { BarkodNo = $"{barkod}-03", HastaAdi = hasta, ProtokolNo = protokol, Bolum = $"{bolum} (Sedimantasyon Tüpü)" }
         };
 
-        EtiketiDogrudanYazdir(
-            simuleIstek.BarkodNo,
-            simuleIstek.HastaAdi,
-            simuleIstek.ProtokolNo,
-            simuleIstek.Bolum,
-            onizlemeGoster: !silentPrint);
+        TopluEtiketleriYazdir(ornekListe, onizlemeGoster: true);
 
         MessageBox.Show(
-            $"SignalR Web İsteği Simüle Edildi!\n\n" +
-            $"Gelen Veri:\nHasta: {simuleIstek.HastaAdi}\nProtokol: {simuleIstek.ProtokolNo}\nBölüm: {simuleIstek.Bolum}\nBarkod: {simuleIstek.BarkodNo}\n\n" +
-            $"Bu istek '{printerName}' yazıcısına fırlatıldı!",
-            "SignalR Entegrasyon Başarılı",
+            $"N-Adet Barkod Emri Simüle Edildi!\n\n" +
+            $"Toplam {ornekListe.Count} adet numune tüpü etiketi üretildi.\n" +
+            $"Hedef Yazıcı: '{SeciliYaziciAdi}'",
+            "N-Adet Barkod Emri Başarılı",
             MessageBoxButtons.OK,
             MessageBoxIcon.Information);
     }
 
     /// <summary>
-    /// Tüm yazdırma işlemlerinin geçtiği çekirdek metod.
-    /// Yazıcı adı ve sessiz baskı ayarı appsettings.json üzerinden okunur.
+    /// TEKLİ ETİKET BASKI METODU: ComboBox'ta seçili yazıcıya yönlendirir.
     /// </summary>
     private void EtiketiDogrudanYazdir(string barkodNo, string hastaAdi, string protokolNo, string bolum, bool onizlemeGoster)
     {
@@ -237,7 +360,6 @@ public partial class Form1 : Form
             {
                 report.Load(sablonYolu);
 
-                // HBYS'den gelen verileri şablondaki parametrelere aktar
                 report.SetParameterValue(ReportObjectNames.ParamBarkodNo,   barkodNo);
                 report.SetParameterValue(ReportObjectNames.ParamHastaAdi,   hastaAdi);
                 report.SetParameterValue(ReportObjectNames.ParamProtokolNo, protokolNo);
@@ -249,15 +371,14 @@ public partial class Form1 : Form
                 }
                 else
                 {
-                    // Yazıcı adı appsettings.json → Printer:Name'den gelir
-                    if (!string.IsNullOrWhiteSpace(printerName))
-                        report.PrintSettings.Printer = printerName;
+                    if (!string.IsNullOrWhiteSpace(SeciliYaziciAdi))
+                        report.PrintSettings.Printer = SeciliYaziciAdi;
 
                     report.PrintSettings.ShowDialog = false;
                     report.Print();
                 }
 
-                lblDurum.Text = $"Durum: [{barkodNo}] barkodlu hasta etiketi başarıyla basıldı.";
+                lblDurum.Text = $"Durum: [{barkodNo}] -> '{SeciliYaziciAdi}' yazıcısına gönderildi.";
             }
         }
         catch (Exception ex)
@@ -267,31 +388,20 @@ public partial class Form1 : Form
     }
 
     /// <summary>
-    /// TOPLU ETİKET BASMA: Numune listesi appsettings.json → BulkPrint:Count kadar üretilir.
-    /// Gerçek projede bu liste DB veya HBYS API'sından sağlanmalıdır.
+    /// N ADET (TOPLU) ETİKET BASKI METODU:
+    /// Web'den gelen N adet barkod emrini seçili yazıcıya basar.
     /// </summary>
-    private void btnYazdirToplu_Click(object sender, EventArgs e)
+    public void TopluEtiketleriYazdir(List<BarkodIstekModel> istekler, bool onizlemeGoster)
     {
+        if (istekler == null || istekler.Count == 0) return;
+
         try
         {
-            // TODO (Gerçek Uygulama): numuneListesi DB veya HBYS API'sından doldurulmalıdır.
-            var numuneListesi = new List<NumuneModel>();
-            for (int i = 1; i <= bulkPrintCount; i++)
-            {
-                numuneListesi.Add(new NumuneModel
-                {
-                    BarkodNo   = $"{txtBarkod.Text.Trim()}-{i:D3}",
-                    HastaAdi   = txtHastaAdi.Text.Trim(),
-                    ProtokolNo = $"{txtProtokolNo.Text.Trim()}-{i:D3}",
-                    Bolum      = $"{txtBolum.Text.Trim()} / Tüp #{i}"
-                });
-            }
-
             using (Report report = new Report())
             {
                 report.Load(sablonYolu);
 
-                report.RegisterData(numuneListesi, ReportObjectNames.DataSourceName);
+                report.RegisterData(istekler, ReportObjectNames.DataSourceName);
                 var dataSource = report.GetDataSource(ReportObjectNames.DataSourceName);
                 dataSource.Enabled = true;
 
@@ -315,9 +425,20 @@ public partial class Form1 : Form
                 if (txtBolumObj != null)
                     txtBolumObj.Text = $"[{ReportObjectNames.DataSourceName}.{ReportObjectNames.ParamBolum}]";
 
-                report.Show();
+                if (onizlemeGoster)
+                {
+                    report.Show();
+                }
+                else
+                {
+                    if (!string.IsNullOrWhiteSpace(SeciliYaziciAdi))
+                        report.PrintSettings.Printer = SeciliYaziciAdi;
 
-                lblDurum.Text = $"Durum: {numuneListesi.Count} adet kan numune tüpü etiketi hazırlandı.";
+                    report.PrintSettings.ShowDialog = false;
+                    report.Print();
+                }
+
+                lblDurum.Text = $"Durum: {istekler.Count} adet etiket -> '{SeciliYaziciAdi}' yazıcısına gönderildi.";
             }
         }
         catch (Exception ex)
@@ -325,17 +446,34 @@ public partial class Form1 : Form
             MessageBox.Show("Toplu yazdırma hatası: " + ex.Message, "Hata", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
     }
+
+    /// <summary>
+    /// Manuel form butonundan N adet test etiketi basma.
+    /// </summary>
+    private void btnYazdirToplu_Click(object sender, EventArgs e)
+    {
+        string barkod = string.IsNullOrWhiteSpace(txtBarkod.Text) ? "869000000" : txtBarkod.Text.Trim();
+        string hasta = string.IsNullOrWhiteSpace(txtHastaAdi.Text) ? "Test Hasta" : txtHastaAdi.Text.Trim();
+        string protokol = string.IsNullOrWhiteSpace(txtProtokolNo.Text) ? "2026-900" : txtProtokolNo.Text.Trim();
+        string bolum = string.IsNullOrWhiteSpace(txtBolum.Text) ? "Biyokimya" : txtBolum.Text.Trim();
+
+        var numuneListesi = new List<BarkodIstekModel>();
+        for (int i = 1; i <= bulkPrintCount; i++)
+        {
+            numuneListesi.Add(new BarkodIstekModel
+            {
+                BarkodNo   = $"{barkod}-{i:D3}",
+                HastaAdi   = hasta,
+                ProtokolNo = $"{protokol}-{i:D3}",
+                Bolum      = $"{bolum} / Tüp #{i}"
+            });
+        }
+
+        TopluEtiketleriYazdir(numuneListesi, onizlemeGoster: true);
+    }
 }
 
 public class BarkodIstekModel
-{
-    public string BarkodNo   { get; set; } = string.Empty;
-    public string HastaAdi   { get; set; } = string.Empty;
-    public string ProtokolNo { get; set; } = string.Empty;
-    public string Bolum      { get; set; } = string.Empty;
-}
-
-public class NumuneModel
 {
     public string BarkodNo   { get; set; } = string.Empty;
     public string HastaAdi   { get; set; } = string.Empty;

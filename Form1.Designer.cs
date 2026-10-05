@@ -3,6 +3,8 @@ namespace FastReportBarcodeApp;
 partial class Form1
 {
     private System.ComponentModel.IContainer components = null;
+    private System.Windows.Forms.Label lblSeciliYazici;
+    private System.Windows.Forms.ComboBox cmbYazicilar;
     private System.Windows.Forms.Button btnTasarla;
     private System.Windows.Forms.Button btnYazdirTekli;
     private System.Windows.Forms.Button btnYazdirToplu;
@@ -31,6 +33,8 @@ partial class Form1
 
     private void InitializeComponent()
     {
+        lblSeciliYazici = new Label();
+        cmbYazicilar = new ComboBox();
         btnTasarla = new Button();
         btnYazdirTekli = new Button();
         btnYazdirToplu = new Button();
@@ -51,14 +55,34 @@ partial class Form1
         grpSignalR.SuspendLayout();
         SuspendLayout();
         // 
+        // lblSeciliYazici
+        // 
+        lblSeciliYazici.AutoSize = true;
+        lblSeciliYazici.Font = new Font("Segoe UI", 9F, FontStyle.Bold);
+        lblSeciliYazici.Location = new Point(30, 15);
+        lblSeciliYazici.Name = "lblSeciliYazici";
+        lblSeciliYazici.Size = new Size(160, 20);
+        lblSeciliYazici.TabIndex = 0;
+        lblSeciliYazici.Text = "🖨️ Hedef Yazıcı Seçin:";
+        // 
+        // cmbYazicilar
+        // 
+        cmbYazicilar.DropDownStyle = ComboBoxStyle.DropDownList;
+        cmbYazicilar.Font = new Font("Segoe UI", 9.5F);
+        cmbYazicilar.FormattingEnabled = true;
+        cmbYazicilar.Location = new Point(30, 38);
+        cmbYazicilar.Name = "cmbYazicilar";
+        cmbYazicilar.Size = new Size(440, 29);
+        cmbYazicilar.TabIndex = 1;
+        // 
         // btnTasarla
         // 
         btnTasarla.BackColor = Color.LightSkyBlue;
-        btnTasarla.Font = new Font("Segoe UI", 11F, FontStyle.Bold);
-        btnTasarla.Location = new Point(30, 20);
+        btnTasarla.Font = new Font("Segoe UI", 10F, FontStyle.Bold);
+        btnTasarla.Location = new Point(30, 80);
         btnTasarla.Name = "btnTasarla";
-        btnTasarla.Size = new Size(440, 48);
-        btnTasarla.TabIndex = 0;
+        btnTasarla.Size = new Size(440, 42);
+        btnTasarla.TabIndex = 2;
         btnTasarla.Text = "🎨 Sürükle-Bırak Etiket Tasarımcısını Aç";
         btnTasarla.UseVisualStyleBackColor = false;
         btnTasarla.Click += btnTasarla_Click;
@@ -74,12 +98,12 @@ partial class Form1
         grpTekli.Controls.Add(lblBolum);
         grpTekli.Controls.Add(txtBolum);
         grpTekli.Controls.Add(btnYazdirTekli);
-        grpTekli.Location = new Point(30, 80);
+        grpTekli.Location = new Point(30, 135);
         grpTekli.Name = "grpTekli";
         grpTekli.Size = new Size(440, 225);
-        grpTekli.TabIndex = 1;
+        grpTekli.TabIndex = 3;
         grpTekli.TabStop = false;
-        grpTekli.Text = "HBYS Manuel Test Alanı (Tekli Hasta Etiketi)";
+        grpTekli.Text = "Manuel Test Alanı (Tekli Hasta Etiketi)";
         // 
         // lblBarkod
         // 
@@ -165,12 +189,12 @@ partial class Form1
         // 
         grpSignalR.Controls.Add(lblSignalRStatus);
         grpSignalR.Controls.Add(btnSignalRSimule);
-        grpSignalR.Location = new Point(30, 315);
+        grpSignalR.Location = new Point(30, 370);
         grpSignalR.Name = "grpSignalR";
         grpSignalR.Size = new Size(440, 110);
-        grpSignalR.TabIndex = 2;
+        grpSignalR.TabIndex = 4;
         grpSignalR.TabStop = false;
-        grpSignalR.Text = "🌐 Web & SignalR Canlı Entegrasyon Modu";
+        grpSignalR.Text = "🌐 Web & SignalR Entegrasyon Modu";
         // 
         // lblSignalRStatus
         // 
@@ -190,7 +214,7 @@ partial class Form1
         btnSignalRSimule.Name = "btnSignalRSimule";
         btnSignalRSimule.Size = new Size(400, 42);
         btnSignalRSimule.TabIndex = 1;
-        btnSignalRSimule.Text = "⚡ Web'den HBYS JSON İsteği Simüle Et";
+        btnSignalRSimule.Text = "⚡ Web'den N Adet Barkod Emri Simüle Et";
         btnSignalRSimule.UseVisualStyleBackColor = false;
         btnSignalRSimule.Click += btnSignalRSimule_Click;
         // 
@@ -198,11 +222,11 @@ partial class Form1
         // 
         btnYazdirToplu.BackColor = Color.WhiteSmoke;
         btnYazdirToplu.Font = new Font("Segoe UI", 9F, FontStyle.Regular);
-        btnYazdirToplu.Location = new Point(30, 435);
+        btnYazdirToplu.Location = new Point(30, 490);
         btnYazdirToplu.Name = "btnYazdirToplu";
         btnYazdirToplu.Size = new Size(440, 35);
-        btnYazdirToplu.TabIndex = 3;
-        btnYazdirToplu.Text = "📦 Toplu Etiket Bas (10 Numune Tüpü)";
+        btnYazdirToplu.TabIndex = 5;
+        btnYazdirToplu.Text = "📦 Toplu Etiket Bas (Test Listesi)";
         btnYazdirToplu.UseVisualStyleBackColor = false;
         btnYazdirToplu.Click += btnYazdirToplu_Click;
         // 
@@ -210,22 +234,24 @@ partial class Form1
         // 
         lblDurum.AutoSize = true;
         lblDurum.ForeColor = Color.DarkSlateGray;
-        lblDurum.Location = new Point(30, 480);
+        lblDurum.Location = new Point(30, 535);
         lblDurum.Name = "lblDurum";
         lblDurum.Size = new Size(271, 20);
-        lblDurum.TabIndex = 4;
+        lblDurum.TabIndex = 6;
         lblDurum.Text = "Durum: Hazır. Şablon: etiket_sablonu.frx";
         // 
         // Form1
         // 
         AutoScaleDimensions = new SizeF(8F, 20F);
         AutoScaleMode = AutoScaleMode.Font;
-        ClientSize = new Size(500, 515);
+        ClientSize = new Size(500, 570);
         Controls.Add(lblDurum);
         Controls.Add(btnYazdirToplu);
         Controls.Add(grpSignalR);
         Controls.Add(grpTekli);
         Controls.Add(btnTasarla);
+        Controls.Add(cmbYazicilar);
+        Controls.Add(lblSeciliYazici);
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         Name = "Form1";
