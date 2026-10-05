@@ -193,6 +193,13 @@ public partial class Form1 : Form
             return;
         }
 
+        if (string.IsNullOrWhiteSpace(SeciliYaziciAdi))
+        {
+            MessageBox.Show("Lütfen yukarıdaki listeden bir hedef yazıcı seçin!", "Yazıcı Seçilmedi", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            cmbYazicilar.Focus();
+            return;
+        }
+
         var istekListesi = new List<BarkodIstekModel>();
         foreach (DataGridViewRow row in dgvBarkodlar.Rows)
         {
@@ -207,7 +214,8 @@ public partial class Form1 : Form
             });
         }
 
-        TopluEtiketleriYazdir(istekListesi, onizlemeGoster: !defaultSilentPrint);
+        // Doğrudan sessiz baskı: Hiçbir diyalog veya önizleme açmadan direkt seçili yazıcıya basar!
+        TopluEtiketleriYazdir(istekListesi, onizlemeGoster: false);
     }
 
     /// <summary>
@@ -253,6 +261,7 @@ public partial class Form1 : Form
                 }
                 else
                 {
+                    // Tamamen sessiz mod: Diyalog penceresi açılmaz, direkt seçili yazıcıya fırlar!
                     if (!string.IsNullOrWhiteSpace(SeciliYaziciAdi))
                         report.PrintSettings.Printer = SeciliYaziciAdi;
 
@@ -260,7 +269,7 @@ public partial class Form1 : Form
                     report.Print();
                 }
 
-                lblDurum.Text = $"Durum: {istekler.Count} adet barkod -> '{SeciliYaziciAdi}' yazıcısına gönderildi.";
+                lblDurum.Text = $"Durum: {istekler.Count} adet barkod '{SeciliYaziciAdi}' yazıcısına başarıyla gönderildi.";
             }
         }
         catch (Exception ex)
