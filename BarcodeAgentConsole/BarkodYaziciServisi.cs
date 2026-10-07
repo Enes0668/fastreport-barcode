@@ -83,6 +83,44 @@ public class BarkodYaziciServisi
         }
     }
 
+    /// <summary>
+    /// TEST METODU (Yazıcı bağlı değilken):
+    /// FastReport PostgreSQL sorgusunu çalıştırır ve sonucu PDF olarak kaydeder.
+    /// </summary>
+    public bool PdfOlarakKaydet(string istekId, string cikisYolu)
+    {
+        try
+        {
+            using (Report report = new Report())
+            {
+                report.Load(_sablonYolu);
+
+                if (!string.IsNullOrWhiteSpace(_postgresConnectionString))
+                {
+                    foreach (DataConnectionBase conn in report.Dictionary.Connections)
+                    {
+                        if (conn is PostgresDataConnection || conn.GetType().Name.Contains("Postgres"))
+                            conn.ConnectionString = _postgresConnectionString;
+                    }
+                }
+
+                report.SetParameterValue("IstekId", istekId);
+                report.Prepare();
+
+                var pdfExport = new FastReport.Export.Pdf.PDFExport();
+                report.Export(pdfExport, cikisYolu);
+
+                LogMesaj($"[TEST BAŞARILI] PostgreSQL sorgusu çalıştırıldı ve etiketler PDF'e döküldü:\n-> {cikisYolu}", ConsoleColor.Cyan);
+                return true;
+            }
+        }
+        catch (Exception ex)
+        {
+            LogMesaj($"[HATA] PDF üretilemedi: {ex.Message}", ConsoleColor.Red);
+            return false;
+        }
+    }
+
     private static void LogMesaj(string mesaj, ConsoleColor renk)
     {
         var eskiRenk = Console.ForegroundColor;
