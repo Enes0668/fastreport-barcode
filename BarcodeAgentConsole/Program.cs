@@ -1,6 +1,6 @@
 using System;
-using System.Collections.Generic;
 using System.Drawing.Printing;
+using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Configuration;
@@ -15,26 +15,26 @@ internal class Program
     static async Task Main(string[] args)
     {
         Console.OutputEncoding = System.Text.Encoding.UTF8;
-        Console.Title = "FastReport Barkod Baskı Ajanı (Console)";
+        Console.Title = "FastReport Barkod Baskı Ajanı (Background Agent)";
 
         Console.ForegroundColor = ConsoleColor.Cyan;
         Console.WriteLine("==================================================================");
-        Console.WriteLine("    🏥 FASTREPORT BARKOD & ETİKET BASKI AJANI (CONSOLE ENGINE)   ");
+        Console.WriteLine("        🏥 FASTREPORT BARKOD BASKI AJANI (BACKGROUND WORKER)      ");
         Console.WriteLine("==================================================================");
         Console.ResetColor();
 
         // 1. Konfigürasyonu yükle
         var config = new ConfigurationBuilder()
             .SetBasePath(AppDomain.CurrentDomain.BaseDirectory)
-            .AddJsonFile("appsettings.json", optional: true, reloadOnChange: false)
+            .AddJsonFile("appsettings.json", optional: true, reloadOnChange: true)
             .Build();
 
         string hubUrl = config["SignalR:HubUrl"] ?? "http://localhost:5000/barkodHub";
         string configYazici = config["Printer:Name"] ?? string.Empty;
         string postgresConn = config["ConnectionStrings:PostgreSql"] ?? string.Empty;
 
-        // 2. Yazıcı Seçimi (Konsol üzerinden dinamik)
-        string secilenYazici = YaziciSec(configYazici);
+        // 2. Yazıcıyı OTOMATİK belirle (Konsolda soru sormaz, kullanıcı beklemez!)
+        string secilenYazici = OtomatikYaziciBelirle(configYazici);
 
         // 3. Baskı Servisini Başlat
         _yaziciServisi = new BarkodYaziciServisi(secilenYazici, postgresConn);
@@ -42,104 +42,84 @@ internal class Program
         // 4. SignalR Dinleyicisini Başlat
         await SignalRBaslatAsync(hubUrl);
 
-        Console.WriteLine();
-        Console.ForegroundColor = ConsoleColor.Yellow;
-        Console.WriteLine("Komutlar: [T] Manuel Test Baskısı Gönder | [C] Ekranı Temizle | [Q] Çıkış");
+        Console.ForegroundColor = ConsoleColor.Green;
+        Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] [AKTİF] Ajan arka planda çalışıyor.");
+        Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] [HEDEF YAZICI] '{secilenYazici}'");
+        Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] [DİNLENİYOR] SignalR Hub: '{hubUrl}'");
         Console.ResetColor();
         Console.WriteLine("------------------------------------------------------------------");
 
-        // 5. Konsol Dinleme Döngüsü
-        while (true)
+        // 5. Arka planda kesintisiz çalışma (Kullanıcı girişi beklemeden servisi canlı tutar)
+        var cts = new CancellationTokenSource();
+        Console.CancelKeyPress += (s, e) =>
         {
-            var key = Console.ReadKey(intercept: true);
-            if (key.Key == ConsoleKey.Q)
-            {
-                Console.WriteLine("\nUygulama kapatılıyor...");
-                if (_hubConnection != null)
-                    await _hubConnection.StopAsync();
-                break;
-            }
-            else if (key.Key == ConsoleKey.T)
-            {
-                ManuelTestBaskisiYap();
-            }
-            else if (key.Key == ConsoleKey.C)
-            {
-                Console.Clear();
-                Console.ForegroundColor = ConsoleColor.Cyan;
-                Console.WriteLine($"[AKTİF] Yazıcı: '{_yaziciServisi.HedefYazici}' | SignalR: '{hubUrl}'");
-                Console.ResetColor();
-            }
+            e.Cancel = true;
+            cts.Cancel();
+        };
+
+        try
+        {
+            await Task.Delay(Timeout.Infinite, cts.Token);
+        }
+        catch (TaskCanceledException)
+        {
+            Console.WriteLine("\n[KAPANIYOR] Baskı ajanı kapatıldı.");
+        }
+        finally
+        {
+            if (_hubConnection != null)
+                await _hubConnection.DisposeAsync();
         }
     }
 
     /// <summary>
-    /// Bilgisayardaki yazıcıları konsolda listeler ve seçim yaptırır.
+    /// Hiçbir kullanıcı etkileşimi olmadan yazıcıyı otomatik belirler:
+    /// 1. appsettings.json içindeki yazıcı
+    /// 2. Windows'un varsayılan kurulu yazıcısı
+    /// 3. Sistemdeki ilk kurulu yazıcı
     /// </summary>
-    private static string YaziciSec(string configYazici)
+    private static string OtomatikYaziciBelirle(string configYazici)
     {
-        var yazicilar = new List<string>();
-        foreach (string p in PrinterSettings.InstalledPrinters)
-            yazicilar.Add(p);
-
-        if (yazicilar.Count == 0)
+        // 1. Config dosyasında tanımlı yazıcı varsa onu al
+        if (!string.IsNullOrWhiteSpace(configYazici))
         {
-            Console.ForegroundColor = ConsoleColor.Red;
-            Console.WriteLine("⚠️ Sistemde kurulu hiçbir yazıcı bulunamadı!");
-            Console.ResetColor();
-            return string.Empty;
-        }
-
-        // Eğer config dosyasında yazıcı adı varsa ve sistemde mevcutsa otomatik seç:
-        if (!string.IsNullOrWhiteSpace(configYazici) && yazicilar.Contains(configYazici))
-        {
-            Console.ForegroundColor = ConsoleColor.Green;
-            Console.WriteLine($"✓ appsettings.json'daki yazıcı otomatik seçildi: '{configYazici}'");
-            Console.ResetColor();
+            Console.WriteLine($"✓ appsettings.json dosyasından okundu: '{configYazici}'");
             return configYazici;
         }
 
-        string varsayilan = string.Empty;
+        // 2. Yoksa Windows'un varsayılan yazıcısını al
         try
         {
-            varsayilan = new PrintDocument().PrinterSettings.PrinterName;
+            var printDoc = new PrintDocument();
+            string varsayilan = printDoc.PrinterSettings.PrinterName;
+            if (!string.IsNullOrWhiteSpace(varsayilan))
+            {
+                Console.WriteLine($"✓ Windows varsayılan yazıcısı otomatik seçildi: '{varsayilan}'");
+                return varsayilan;
+            }
         }
         catch { }
 
-        Console.WriteLine("\nKurulu Yazıcılar:");
-        int secimIndex = 0;
-        for (int i = 0; i < yazicilar.Count; i++)
+        // 3. O da bulunamazsa sistemdeki ilk kurulu yazıcıyı al
+        foreach (string printer in PrinterSettings.InstalledPrinters)
         {
-            bool isDefault = yazicilar[i].Equals(varsayilan, StringComparison.OrdinalIgnoreCase);
-            if (isDefault) secimIndex = i;
-
-            Console.WriteLine($"  [{i + 1}] {yazicilar[i]} {(isDefault ? "(Windows Varsayılan)" : "")}");
+            Console.WriteLine($"✓ İlk kurulu yazıcı otomatik seçildi: '{printer}'");
+            return printer;
         }
 
-        Console.Write($"\nHedef barkod yazıcısını seçin [Varsayılan: {secimIndex + 1}]: ");
-        string? giris = Console.ReadLine();
-
-        if (int.TryParse(giris, out int secilenNo) && secilenNo >= 1 && secilenNo <= yazicilar.Count)
-        {
-            secimIndex = secilenNo - 1;
-        }
-
-        string secilen = yazicilar[secimIndex];
-        Console.ForegroundColor = ConsoleColor.Green;
-        Console.WriteLine($"✓ Hedef Yazıcı Belirlendi: '{secilen}'\n");
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine("⚠️ Sistemde kurulu yazıcı bulunamadı!");
         Console.ResetColor();
-        return secilen;
+        return string.Empty;
     }
 
     /// <summary>
-    /// SignalR bağlantısını kurar ve dışarıdan gelen emirleri dinler.
+    /// SignalR bağlantısını kurar ve arka planda gelen baskı emirlerini dinler.
     /// </summary>
     private static async Task SignalRBaslatAsync(string hubUrl)
     {
         try
         {
-            Console.Write($"📡 SignalR Hub'a bağlanılıyor ({hubUrl})... ");
-
             _hubConnection = new HubConnectionBuilder()
                 .WithUrl(hubUrl)
                 .WithAutomaticReconnect()
@@ -157,39 +137,19 @@ internal class Program
                 _yaziciServisi?.TopluBarkodBas(istekListesi);
             });
 
-            // 3. POSTGRESQL SORGUSUYLA N ADET BARKOD EMRİ
+            // 3. POSTGRESQL SORGUSUYLA BARKOD EMRİ
             _hubConnection.On<string>("PostgresBarkodYazdir", (istekId) =>
             {
                 _yaziciServisi?.PostgresIleBarkodBas(istekId);
             });
 
             await _hubConnection.StartAsync();
-
-            Console.ForegroundColor = ConsoleColor.Green;
-            Console.WriteLine("[BAĞLANDI]");
-            Console.ResetColor();
         }
         catch (Exception ex)
         {
             Console.ForegroundColor = ConsoleColor.Yellow;
-            Console.WriteLine($"[BEKLEMEDE] Hub henüz aktif değil ({ex.Message}). Arka planda otomatik yeniden denenecek.");
+            Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] [UYARI] SignalR henüz hazır değil ({ex.Message}). Arka planda otomatik tekrar bağlanacak.");
             Console.ResetColor();
         }
-    }
-
-    /// <summary>
-    /// Konsoldan 'T' tuşuna basıldığında test amaçlı N adet barkod basar.
-    /// </summary>
-    private static void ManuelTestBaskisiYap()
-    {
-        Console.WriteLine("\n[TEST] 3 adet kan tüpü etiketi üretiliyor...");
-        var testListesi = new List<BarkodIstekModel>
-        {
-            new() { BarkodNo = "869012345001", HastaAdi = "Ahmet Yılmaz", Bolum = "Dahiliye (Kırmızı Tüp)", ProtokolNo = "2026-98451" },
-            new() { BarkodNo = "869012345002", HastaAdi = "Ahmet Yılmaz", Bolum = "Hemogram (Mor Tüp)", ProtokolNo = "2026-98451" },
-            new() { BarkodNo = "869012345003", HastaAdi = "Ahmet Yılmaz", Bolum = "Sedimantasyon", ProtokolNo = "2026-98451" }
-        };
-
-        _yaziciServisi?.TopluBarkodBas(testListesi);
     }
 }
