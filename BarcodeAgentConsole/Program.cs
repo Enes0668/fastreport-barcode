@@ -114,13 +114,51 @@ internal class Program
                 _yaziciServisi?.BarkodBas(emir.IstekId, emir.HedefYazici);
             });
 
+            // Web ekranı "Bana güncel yazıcılarını tekrar gönder" dediğinde:
+            _hubConnection.On("YazicilariGetir", async () =>
+            {
+                await YazicilariWebEBildirAsync();
+            });
+
             await _hubConnection.StartAsync();
+
+            // BAĞLANTI KURULUR KURULMAZ: Masadaki tüm yazıcıları Web'e bildir! (Web'deki dropdown dolsun)
+            await YazicilariWebEBildirAsync();
         }
         catch (Exception ex)
         {
             Console.ForegroundColor = ConsoleColor.Yellow;
             Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] [UYARI] SignalR henüz hazır değil ({ex.Message}). Arka planda otomatik tekrar denenecek.");
             Console.ResetColor();
+        }
+    }
+
+    /// <summary>
+    /// Bilgisayarda kurulu yazıcıları listeler ve SignalR üzerinden Web'e bildirir.
+    /// Böylece Web sayfasındaki açılır kutu (Dropdown) otomatik dolar!
+    /// </summary>
+    private static async Task YazicilariWebEBildirAsync()
+    {
+        if (_hubConnection == null || _hubConnection.State != HubConnectionState.Connected) return;
+
+        try
+        {
+            var yazicilar = new List<string>();
+            foreach (string p in PrinterSettings.InstalledPrinters)
+            {
+                yazicilar.Add(p);
+            }
+
+            // Web Hub'ına yazıcı listesini fırlatıyoruz:
+            await _hubConnection.InvokeAsync("YazicilariBildir", yazicilar);
+
+            Console.ForegroundColor = ConsoleColor.Cyan;
+            Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] [BİLGİ] {yazicilar.Count} adet yazıcı Web sistemine bildirildi.");
+            Console.ResetColor();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[UYARI] Yazıcı listesi Web'e iletilemedi: {ex.Message}");
         }
     }
 }

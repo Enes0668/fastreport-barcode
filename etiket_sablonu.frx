@@ -1,35 +1,17 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
-<Report ScriptLanguage="CSharp" ReportInfo.Created="10/07/2026 13:30:40" ReportInfo.Modified="10/07/2026 14:13:20" ReportInfo.CreatorVersion="2026.2.8.0">
+<Report ScriptLanguage="CSharp" ReportInfo.Created="10/07/2026 13:30:40" ReportInfo.Modified="10/10/2026 16:17:27" ReportInfo.CreatorVersion="2026.2.8.0">
   <Dictionary>
-    <PostgresDataConnection Name="Connection" ConnectionString="rijcmlq8ZkN6qUj4G/zvKvLeJ9DDB6WCp22J48oQEWWvz8/J/OF4+fln3udykAo+gO/4y9SDQ2BPb/7ECkSQ8wEBrV4fQ==">
-      <TableDataSource Name="public_lab_numune_istekleri" DataType="System.Int32" Enabled="true" TableName="public.&quot;lab_numune_istekleri&quot;">
-        <Column Name="id" DataType="System.Int32"/>
-        <Column Name="istek_id" DataType="System.Int32"/>
-        <Column Name="barkod_no" DataType="System.String"/>
-        <Column Name="hasta_adi" DataType="System.String"/>
-        <Column Name="protokol_no" DataType="System.String"/>
-        <Column Name="bolum" DataType="System.String"/>
-        <Column Name="tup_turu" DataType="System.String"/>
-      </TableDataSource>
-      <TableDataSource Name="Table" DataType="System.Int32" Enabled="true" SelectCommand="SELECT barkod_no, hasta_adi, protokol_no, bolum, tup_turu &#13;&#10;FROM lab_numune_istekleri &#13;&#10;WHERE istek_id = 504">
-        <Column Name="barkod_no" DataType="System.String"/>
-        <Column Name="hasta_adi" DataType="System.String"/>
-        <Column Name="protokol_no" DataType="System.String"/>
-        <Column Name="bolum" DataType="System.String"/>
-        <Column Name="tup_turu" DataType="System.String"/>
-      </TableDataSource>
-    </PostgresDataConnection>
     <Parameter Name="BarkodNo" DataType="System.String" AsString=""/>
     <Parameter Name="HastaAdi" DataType="System.String" AsString=""/>
     <Parameter Name="ProtokolNo" DataType="System.String" AsString=""/>
     <Parameter Name="Bolum" DataType="System.String" AsString=""/>
   </Dictionary>
   <ReportPage Name="EtiketSayfasi" PaperWidth="100" PaperHeight="50" LeftMargin="2" TopMargin="2" RightMargin="2" BottomMargin="2" Watermark.Font="Arial, 60pt">
-    <DataBand Name="Data1" Width="362.88" Height="173.88" DataSource="Table">
-      <TextObject Name="txtHastaAdi" Left="7.56" Top="3.78" Width="347.76" Height="26.46" Text="[Table.hasta_adi]" HorzAlign="Center" VertAlign="Center" Font="Arial, 10pt, style=Bold"/>
-      <BarcodeObject Name="Barcode1" Left="18.9" Top="34.02" Width="277.5" Height="90.72" Expression="[BarkodNo]" Text="[Table.barkod_no]" AllowExpressions="true" HorzAlign="Center" Barcode="Code128" Barcode.AutoEncode="true"/>
-      <TextObject Name="txtProtokolNo" Left="7.56" Top="128.52" Width="170.1" Height="22.68" Text="&quot;Prot: &quot; + [Table.protokol_no]" VertAlign="Center" Font="Arial, 9pt, style=Bold"/>
-      <TextObject Name="txtBolum" Left="171.99" Top="137.97" Width="173.88" Height="22.68" Text="[Table.bolum] + &quot; - &quot; + [Table.tup_turu]" HorzAlign="Right" VertAlign="Center" Font="Arial, 9pt"/>
+    <DataBand Name="Data1" Width="362.88" Height="173.88">
+      <TextObject Name="txtHastaAdi" Left="7.56" Top="3.78" Width="347.76" Height="26.46" Text="[HastaAdi]" HorzAlign="Center" VertAlign="Center" Font="Arial, 10pt, style=Bold"/>
+      <BarcodeObject Name="Barcode1" Left="217.35" Top="34.02" Width="98.75" Height="90.72" Expression="[BarkodNo]" HorzAlign="Center" Barcode="Code128" Barcode.AutoEncode="true"/>
+      <TextObject Name="txtProtokolNo" Left="7.56" Top="128.52" Width="170.1" Height="22.68" Text="Prot: [ProtokolNo]" VertAlign="Center" Font="Arial, 9pt, style=Bold"/>
+      <TextObject Name="txtBolum" Left="181.44" Top="128.52" Width="173.88" Height="22.68" Text="[Bolum]" HorzAlign="Right" VertAlign="Center" Font="Arial, 9pt"/>
     </DataBand>
   </ReportPage>
 </Report>
