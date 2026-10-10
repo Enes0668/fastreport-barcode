@@ -32,12 +32,13 @@ internal class Program
         string hubUrl = config["SignalR:HubUrl"] ?? "http://localhost:5000/barkodHub";
         string configYazici = config["Printer:Name"] ?? string.Empty;
         string postgresConn = config["ConnectionStrings:PostgreSql"] ?? string.Empty;
+        string templatePath = config["TemplatePath"] ?? "../etiket_sablonu.frx";
 
         // 2. Yazıcıyı otomatik belirle
         string secilenYazici = OtomatikYaziciBelirle(configYazici);
 
-        // 3. Baskı Servisini Başlat
-        _yaziciServisi = new BarkodYaziciServisi(secilenYazici, postgresConn);
+        // 3. Baskı Servisini Başlat (Ortak şablon dosyasını bağla)
+        _yaziciServisi = new BarkodYaziciServisi(secilenYazici, postgresConn, templatePath);
 
         // 4. SignalR Dinleyicisini Başlat
         await SignalRBaslatAsync(hubUrl);

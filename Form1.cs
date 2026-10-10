@@ -304,13 +304,46 @@ public partial class Form1 : Form
 
                 report.Design();
 
-                lblDurum.Text = "Durum: Tasarım güncellendi ve kaydedildi.";
+                // OTOMATİK SENKRONİZASYON (1. YOL):
+                // Tasarımcıda kaydedilen şablonu konsol projesine ve ana dizine anında eşitle!
+                SenkronizeEtSablonu();
+
+                lblDurum.Text = "Durum: Tasarım güncellendi ve konsol ajanına otomatik eşitlendi!";
             }
         }
         catch (Exception ex)
         {
             MessageBox.Show("Tasarımcı açılırken hata: " + ex.Message, "Hata", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
+    }
+
+    /// <summary>
+    /// Tasarımcıda yapılan değişiklikleri kök dizindeki ve konsol projesindeki şablonlara otomatik kopyalar.
+    /// Böylece kullanıcı elle dosya taşımakla uğraşmaz!
+    /// </summary>
+    private void SenkronizeEtSablonu()
+    {
+        try
+        {
+            if (!File.Exists(sablonYolu)) return;
+
+            string anaDizin = Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, @"..\..\..\"));
+            string kokSablon = Path.Combine(anaDizin, "etiket_sablonu.frx");
+            string konsolSablon = Path.Combine(anaDizin, "BarcodeAgentConsole", "etiket_sablonu.frx");
+            string konsolBinSablon = Path.Combine(anaDizin, "BarcodeAgentConsole", "bin", "Debug", "net8.0-windows", "etiket_sablonu.frx");
+
+            // 1. Kök dizine kopyala
+            File.Copy(sablonYolu, kokSablon, overwrite: true);
+
+            // 2. Konsol projesine kopyala
+            if (Directory.Exists(Path.GetDirectoryName(konsolSablon)))
+                File.Copy(sablonYolu, konsolSablon, overwrite: true);
+
+            // 3. Konsolun çalışan bin dizinine kopyala (varsa)
+            if (Directory.Exists(Path.GetDirectoryName(konsolBinSablon)))
+                File.Copy(sablonYolu, konsolBinSablon, overwrite: true);
+        }
+        catch { }
     }
 
     /// <summary>

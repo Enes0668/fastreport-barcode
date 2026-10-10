@@ -11,11 +11,28 @@ public class BarkodYaziciServisi
     private readonly string _postgresConnectionString;
     public string VarsayilanYazici { get; set; }
 
-    public BarkodYaziciServisi(string varsayilanYazici, string postgresConnString)
+    public BarkodYaziciServisi(string varsayilanYazici, string postgresConnString, string? ozelSablonYolu = null)
     {
         VarsayilanYazici = varsayilanYazici;
         _postgresConnectionString = postgresConnString;
-        _sablonYolu = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "etiket_sablonu.frx");
+
+        // Akıllı Ortak Şablon Yolu Tespiti:
+        // 1. Verilen özel yol varsa ve dosya mevcutsa onu al
+        if (!string.IsNullOrWhiteSpace(ozelSablonYolu))
+        {
+            string tamYol = Path.IsPathRooted(ozelSablonYolu) 
+                ? ozelSablonYolu 
+                : Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, ozelSablonYolu));
+
+            if (File.Exists(tamYol))
+                _sablonYolu = tamYol;
+            else
+                _sablonYolu = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "etiket_sablonu.frx");
+        }
+        else
+        {
+            _sablonYolu = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "etiket_sablonu.frx");
+        }
 
         // FastReport motoruna PostgreSQL bağlantı sürücüsünü kaydet
         FastReport.Utils.RegisteredObjects.AddConnection(typeof(PostgresDataConnection));
