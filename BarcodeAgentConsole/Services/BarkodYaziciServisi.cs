@@ -83,8 +83,18 @@ public class BarkodYaziciServisi : IYaziciServisi
                     }
                 }
 
-                // 2. Şablondaki @IstekId parametresini ayarla
+                // 2. Şablondaki parametreleri ayarla
                 report.SetParameterValue("IstekId", istekId);
+
+                // SQL sorgusu yoksa veya veritabanı bağlı değilse etiket boş çıkmasın diye fallback test parametreleri:
+                if (report.Parameters.FindByName("BarkodNo") != null)
+                    report.SetParameterValue("BarkodNo", istekId);
+                if (report.Parameters.FindByName("HastaAdi") != null)
+                    report.SetParameterValue("HastaAdi", $"Test Hasta (İstek #{istekId})");
+                if (report.Parameters.FindByName("ProtokolNo") != null)
+                    report.SetParameterValue("ProtokolNo", $"P-{istekId}");
+                if (report.Parameters.FindByName("Bolum") != null)
+                    report.SetParameterValue("Bolum", "Acil / Biyokimya");
 
                 // 3. Raporu hazırla (SQL sorgusu burada çalışır ve satırlar çekilir)
                 report.Prepare();
