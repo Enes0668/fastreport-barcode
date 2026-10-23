@@ -1,5 +1,8 @@
 using System;
 using System.IO;
+using System.Net.Sockets;
+using System.Text;
+using System.Text.Json;
 using FastReport;
 using FastReport.Data;
 using Microsoft.Extensions.Configuration;
@@ -11,6 +14,7 @@ public class BarkodYaziciServisi : IYaziciServisi
 {
     private readonly string _sablonYolu;
     private readonly string _postgresConnectionString;
+    private readonly IYaziciYoneticisi _yaziciYoneticisi;
     private readonly ILogger<BarkodYaziciServisi> _logger;
 
     public string VarsayilanYazici { get; set; }
@@ -21,6 +25,7 @@ public class BarkodYaziciServisi : IYaziciServisi
         ILogger<BarkodYaziciServisi> logger)
     {
         _logger = logger;
+        _yaziciYoneticisi = yaziciYoneticisi;
         _postgresConnectionString = config["ConnectionStrings:PostgreSql"] ?? string.Empty;
 
         string configYazici = config["Printer:Name"] ?? string.Empty;
@@ -45,9 +50,9 @@ public class BarkodYaziciServisi : IYaziciServisi
 
     /// <summary>
     /// TEK VE ANA BASKI METODU:
-    /// C# tarafında HastaAdi, Bolum, BarkodNo gibi verilerle uğraşılmaz!
-    /// C# sadece IstekId'yi şablona verir; FastReport içindeki SQL sorgusu
-    /// PostgreSQL'e gidip o isteğe ait tüm verileri dinamik çeker ve basar.
+    /// Eğer seçilen yazıcı yerel ağdaki başka bir Agent'a (örn. A bilgisayarına) aitse,
+    /// baskı emrini ağ üzerinden o bilgisayara yönlendirir.
+    /// Yerel yazıcı ise doğrudan FastReport ile bu bilgisayardan basar.
     /// </summary>
     public (bool Basarili, string Mesaj) BarkodBas(string istekId, string? ozelYazici = null)
     {
@@ -59,6 +64,12 @@ public class BarkodYaziciServisi : IYaziciServisi
         }
 
         string hedefYazici = !string.IsNullOrWhiteSpace(ozelYazici) ? ozelYazici : VarsayilanYazici;
+
+        // 2. KADEME KONTROLÜ: Seçilen yazıcı ağdaki diğer bilgisayara (örn. PC-A) mı ait?
+        if (_yaziciYoneticisi.AgYazicisiMi(hedefYazici, out string hedefIp, out int hedefPort, out string gercekYaziciAdi))
+        {
+            return AgdakiBilgisayaraBaskiGonder(istekId, hedefIp, hedefPort, gercekYaziciAdi);
+        }
 
         try
         {
@@ -116,6 +127,55 @@ public class BarkodYaziciServisi : IYaziciServisi
             string msg = $"Baskı başarısız (İstek #{istekId}): {ex.Message}";
             _logger.LogError(ex, "{Mesaj}", msg);
             return (false, msg);
+        }
+    }
+
+    /// <summary>
+    /// 2. KADEME: Seçilen yazıcı başka bir bilgisayardaki Agent'a (örn. PC-A) bağlı olduğunda,
+    /// yazdırma emrini yerel ağ (TCP) üzerinden o bilgisayarın IP ve Portuna iletir.
+    /// </summary>
+    private (bool Basarili, string Mesaj) AgdakiBilgisayaraBaskiGonder(string istekId, string hedefIp, int hedefPort, string gercekYaziciAdi)
+    {
+        try
+        {
+            _logger.LogInformation("📤 [AĞ YÖNLENDİRME] İstek #{IstekId} -> {Ip}:{Port} adresindeki '{Yazici}' yazıcısına gönderiliyor...",
+                istekId, hedefIp, hedefPort, gercekYaziciAdi);
+
+            using var tcpClient = new TcpClient();
+            tcpClient.Connect(hedefIp, hedefPort);
+
+            using var stream = tcpClient.GetStream();
+            using var writer = new StreamWriter(stream, Encoding.UTF8) { AutoFlush = true };
+            using var reader = new StreamReader(stream, Encoding.UTF8);
+
+            var istekPaketi = new AgBaskiIstekPaketi
+            {
+                GonderenAjan = Environment.MachineName,
+                IstekId = istekId,
+                HedefYazici = gercekYaziciAdi
+            };
+
+            string jsonIstek = JsonSerializer.Serialize(istekPaketi);
+            writer.WriteLine(jsonIstek);
+
+            string? jsonYanit = reader.ReadLine();
+            if (!string.IsNullOrWhiteSpace(jsonYanit))
+            {
+                var sonuc = JsonSerializer.Deserialize<BarkodSonucModel>(jsonYanit);
+                if (sonuc != null)
+                {
+                    _logger.LogInformation("📥 [AĞ YANITI ALINDI] ({Ip}:{Port}): {Mesaj}", hedefIp, hedefPort, sonuc.Mesaj);
+                    return (sonuc.Basarili, $"[Ağ Üzerinden ({hedefIp}:{hedefPort})] {sonuc.Mesaj}");
+                }
+            }
+
+            return (true, $"İstek #{istekId} ağdaki ({hedefIp}:{hedefPort}) '{gercekYaziciAdi}' yazıcısına iletildi.");
+        }
+        catch (Exception ex)
+        {
+            string hata = $"Ağdaki bilgisayara ({hedefIp}:{hedefPort}) ulaşılamadı: {ex.Message}";
+            _logger.LogError(ex, "{Hata}", hata);
+            return (false, hata);
         }
     }
 
