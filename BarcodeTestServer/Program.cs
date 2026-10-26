@@ -23,7 +23,7 @@ builder.Services.AddCors(options =>
 var app = builder.Build();
 
 app.UseCors();
-app.Urls.Add("http://localhost:5000");
+app.Urls.Add("http://0.0.0.0:5000");
 
 // SignalR Hub Endpoint'i (BarcodeAgentConsole tam bu adresi dinliyor)
 app.MapHub<BarkodHub>("/barkodHub");

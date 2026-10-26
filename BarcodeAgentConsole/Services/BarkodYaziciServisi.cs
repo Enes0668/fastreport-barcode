@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Net.Sockets;
 using System.Text;
@@ -14,6 +15,7 @@ public class BarkodYaziciServisi : IYaziciServisi
 {
     private readonly string _sablonYolu;
     private readonly string _postgresConnectionString;
+    private readonly IConfiguration _config;
     private readonly IYaziciYoneticisi _yaziciYoneticisi;
     private readonly ILogger<BarkodYaziciServisi> _logger;
 
@@ -24,6 +26,7 @@ public class BarkodYaziciServisi : IYaziciServisi
         IYaziciYoneticisi yaziciYoneticisi,
         ILogger<BarkodYaziciServisi> logger)
     {
+        _config = config;
         _logger = logger;
         _yaziciYoneticisi = yaziciYoneticisi;
         _postgresConnectionString = config["ConnectionStrings:PostgreSql"] ?? string.Empty;
@@ -51,10 +54,10 @@ public class BarkodYaziciServisi : IYaziciServisi
     /// <summary>
     /// TEK VE ANA BASKI METODU:
     /// Eğer seçilen yazıcı yerel ağdaki başka bir Agent'a (örn. A bilgisayarına) aitse,
-    /// baskı emrini ağ üzerinden o bilgisayara yönlendirir.
+    /// baskı emrini ve parametreleri ağ üzerinden o bilgisayara yönlendirir.
     /// Yerel yazıcı ise doğrudan FastReport ile bu bilgisayardan basar.
     /// </summary>
-    public (bool Basarili, string Mesaj) BarkodBas(string istekId, string? ozelYazici = null)
+    public (bool Basarili, string Mesaj) BarkodBas(string istekId, string? ozelYazici = null, Dictionary<string, string>? parametreler = null)
     {
         if (string.IsNullOrWhiteSpace(istekId))
         {
@@ -68,7 +71,7 @@ public class BarkodYaziciServisi : IYaziciServisi
         // 2. KADEME KONTROLÜ: Seçilen yazıcı ağdaki diğer bilgisayara (örn. PC-A) mı ait?
         if (_yaziciYoneticisi.AgYazicisiMi(hedefYazici, out string hedefIp, out int hedefPort, out string gercekYaziciAdi))
         {
-            return AgdakiBilgisayaraBaskiGonder(istekId, hedefIp, hedefPort, gercekYaziciAdi);
+            return AgdakiBilgisayaraBaskiGonder(istekId, hedefIp, hedefPort, gercekYaziciAdi, parametreler);
         }
 
         try
@@ -94,18 +97,8 @@ public class BarkodYaziciServisi : IYaziciServisi
                     }
                 }
 
-                // 2. Şablondaki parametreleri ayarla
-                report.SetParameterValue("IstekId", istekId);
-
-                // SQL sorgusu yoksa veya veritabanı bağlı değilse etiket boş çıkmasın diye fallback test parametreleri:
-                if (report.Parameters.FindByName("BarkodNo") != null)
-                    report.SetParameterValue("BarkodNo", istekId);
-                if (report.Parameters.FindByName("HastaAdi") != null)
-                    report.SetParameterValue("HastaAdi", $"Test Hasta (İstek #{istekId})");
-                if (report.Parameters.FindByName("ProtokolNo") != null)
-                    report.SetParameterValue("ProtokolNo", $"P-{istekId}");
-                if (report.Parameters.FindByName("Bolum") != null)
-                    report.SetParameterValue("Bolum", "Acil / Biyokimya");
+                // 2. Şablondaki parametreleri dinamik/parametrik olarak ayarla
+                SablonParametreleriniUygula(report, istekId, parametreler);
 
                 // 3. Raporu hazırla (SQL sorgusu burada çalışır ve satırlar çekilir)
                 report.Prepare();
@@ -131,10 +124,59 @@ public class BarkodYaziciServisi : IYaziciServisi
     }
 
     /// <summary>
+    /// Şablondaki tüm parametreleri tamamen dinamik Key-Value mantığıyla doldurur:
+    /// 1) Önce appsettings.json -> SablonParametreleri altındaki tüm Key-Value çiftlerini okur,
+    /// 2) Sonra istekten gelen dinamik parametreler (gelenParametreler) varsa üzerine yazar,
+    /// 3) Son olarak döngüyle şablondaki eşleşen tüm parametrelere değerlerini atar.
+    /// </summary>
+    private void SablonParametreleriniUygula(Report report, string istekId, Dictionary<string, string>? gelenParametreler)
+    {
+        report.SetParameterValue("IstekId", istekId);
+
+        var tumParametreler = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        // 1. appsettings.json -> "SablonParametreleri" altındaki tüm Key'leri dinamik olarak oku
+        var configBolumu = _config.GetSection("SablonParametreleri");
+        foreach (var child in configBolumu.GetChildren())
+        {
+            if (!string.IsNullOrWhiteSpace(child.Value))
+            {
+                tumParametreler[child.Key] = child.Value.Replace("{IstekId}", istekId);
+            }
+        }
+
+        // 2. İstekle birlikte dışarıdan gönderilen Key-Value çiftleri varsa ekle veya güncelle
+        if (gelenParametreler != null)
+        {
+            foreach (var kvp in gelenParametreler)
+            {
+                if (!string.IsNullOrWhiteSpace(kvp.Value))
+                {
+                    tumParametreler[kvp.Key] = kvp.Value;
+                }
+            }
+        }
+
+        // 3. Şablonda tanımlı olan tüm eşleşen parametrelere değerlerini ata
+        foreach (var kvp in tumParametreler)
+        {
+            if (report.Parameters.FindByName(kvp.Key) != null)
+            {
+                report.SetParameterValue(kvp.Key, kvp.Value);
+            }
+        }
+    }
+
+    /// <summary>
     /// 2. KADEME: Seçilen yazıcı başka bir bilgisayardaki Agent'a (örn. PC-A) bağlı olduğunda,
     /// yazdırma emrini yerel ağ (TCP) üzerinden o bilgisayarın IP ve Portuna iletir.
     /// </summary>
-    private (bool Basarili, string Mesaj) AgdakiBilgisayaraBaskiGonder(string istekId, string hedefIp, int hedefPort, string gercekYaziciAdi)
+    private (bool Basarili, string Mesaj) AgdakiBilgisayaraBaskiGonder(
+        string istekId,
+        string hedefIp,
+        int hedefPort,
+        string gercekYaziciAdi,
+        Dictionary<string, string>? parametreler = null)
     {
         try
         {
@@ -152,7 +194,8 @@ public class BarkodYaziciServisi : IYaziciServisi
             {
                 GonderenAjan = Environment.MachineName,
                 IstekId = istekId,
-                HedefYazici = gercekYaziciAdi
+                HedefYazici = gercekYaziciAdi,
+                Parametreler = parametreler
             };
 
             string jsonIstek = JsonSerializer.Serialize(istekPaketi);

@@ -7,7 +7,9 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using BarcodeAgentConsole.Hubs;
 using BarcodeAgentConsole.Services;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
@@ -16,15 +18,15 @@ using Microsoft.Extensions.Logging;
 namespace BarcodeAgentConsole.Workers;
 
 /// <summary>
-/// Arka planda kesintisiz çalışan, SignalR soket bağlantısını yöneten,
-/// yerel ağdaki (LAN) diğer Agent'larla yazıcı paylaşımı yapan ve gelen
-/// baskı emirlerini karşılayıp yazıcı servisine yönlendiren ana işçi servis (Worker).
+/// Arka planda kesintisiz çalışan, gömülü SignalR Hub'ı ve yerel ağdaki (LAN) diğer Agent'larla
+/// yazıcı paylaşımını yöneten, gelen baskı emirlerini karşılayıp yazıcı servisine yönlendiren ana işçi servis (Worker).
 /// </summary>
 public class BarkodAjanWorker : BackgroundService
 {
     private readonly ILogger<BarkodAjanWorker> _logger;
     private readonly IYaziciServisi _yaziciServisi;
     private readonly IYaziciYoneticisi _yaziciYoneticisi;
+    private readonly IHubContext<YerelBarkodHub> _yerelHubContext;
     private readonly string _hubUrl;
     private readonly bool _agPaylasimAktif;
     private readonly int _udpBroadcastPort;
@@ -40,11 +42,13 @@ public class BarkodAjanWorker : BackgroundService
         ILogger<BarkodAjanWorker> logger,
         IYaziciServisi yaziciServisi,
         IYaziciYoneticisi yaziciYoneticisi,
+        IHubContext<YerelBarkodHub> yerelHubContext,
         IConfiguration config)
     {
         _logger = logger;
         _yaziciServisi = yaziciServisi;
         _yaziciYoneticisi = yaziciYoneticisi;
+        _yerelHubContext = yerelHubContext;
         _hubUrl = config["SignalR:HubUrl"] ?? "http://localhost:5000/barkodHub";
         _agPaylasimAktif = bool.TryParse(config["AgPaylasim:Aktif"], out bool aktif) ? aktif : true;
         _udpBroadcastPort = int.TryParse(config["AgPaylasim:UdpPort"], out int uPort) ? uPort : 5050;
@@ -94,7 +98,7 @@ public class BarkodAjanWorker : BackgroundService
                 _tcpListener = new TcpListener(IPAddress.Any, denenenPort);
                 _tcpListener.Start();
                 _aktifTcpPort = denenenPort;
-                _ajanAdi = $"PC-{(char)('A' + i)}";
+                _ajanAdi = $"{Environment.MachineName}-{(char)('A' + i)}";
                 Console.Title = $"FastReport Barkod Ajanı - {_ajanAdi} ({_yerelIp}:{_aktifTcpPort})";
                 break;
             }
@@ -141,7 +145,7 @@ public class BarkodAjanWorker : BackgroundService
             _logger.LogInformation("📥 [AĞDAN BASKI GELDİ] Gönderen: {Gonderen} -> İstek #{IstekId}, Hedef Yazıcı: '{Yazici}'",
                 istek.GonderenAjan, istek.IstekId, istek.HedefYazici);
 
-            var sonuc = _yaziciServisi.BarkodBas(istek.IstekId, istek.HedefYazici);
+            var sonuc = _yaziciServisi.BarkodBas(istek.IstekId, istek.HedefYazici, istek.Parametreler);
 
             var yanit = new BarkodSonucModel
             {
@@ -218,6 +222,7 @@ public class BarkodAjanWorker : BackgroundService
             using var udpListener = new UdpClient();
             if (reuseAddress)
             {
+                udpListener.ExclusiveAddressUse = false;
                 udpListener.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
             }
             udpListener.Client.Bind(new IPEndPoint(IPAddress.Any, port));
@@ -312,9 +317,9 @@ public class BarkodAjanWorker : BackgroundService
         {
             string hedef = emir.HedefYazici ?? _yaziciServisi.VarsayilanYazici;
 
-            // Aynı bilgisayarda test ederken: Seçilen yazıcı "[PC-A | ...]" şeklinde bir ağ yazıcısıysa
-            // ve bu pencerenin kendisi PC-A ise, emri PC-B'nin TCP üzerinden yönlendirmesini bekle.
-            if (hedef.StartsWith($"[{_ajanAdi} |"))
+            // Seçilen yazıcı "[AjanAdi | IP:Port]" şeklinde bu pencerenin kendisine aitse,
+            // emri diğer bilgisayarın (veya diğer pencerenin) TCP üzerinden yönlendirmesini bekle.
+            if (hedef.StartsWith($"[{_ajanAdi} | {_yerelIp}:{_aktifTcpPort}]"))
             {
                 return;
             }
@@ -322,7 +327,7 @@ public class BarkodAjanWorker : BackgroundService
             _logger.LogInformation("Web'den 'BarkodYazdirGelismi' emri alındı -> İstek #{IstekId}, Hedef: '{Yazici}'",
                 emir.IstekId, hedef);
 
-            var sonuc = _yaziciServisi.BarkodBas(emir.IstekId, emir.HedefYazici);
+            var sonuc = _yaziciServisi.BarkodBas(emir.IstekId, emir.HedefYazici, emir.Parametreler);
             await SonucBildirAsync(emir.IstekId, sonuc.Basarili, sonuc.Mesaj, hedef);
         });
 
@@ -348,11 +353,28 @@ public class BarkodAjanWorker : BackgroundService
 
     private async Task YazicilariWebEBildirAsync()
     {
+        var yazicilar = _yaziciYoneticisi.YukluYazicilariGetir();
+
+        // 1. Agent'ın kendi içindeki Gömülü (Yerel) SignalR Hub'a bağlı tüm HBYS web ekranlarına anında bildir:
+        try
+        {
+            await _yerelHubContext.Clients.All.SendAsync("YazicilarAlindi", new
+            {
+                connectionId = _ajanAdi,
+                yazicilar = yazicilar,
+                zaman = DateTime.Now.ToString("HH:mm:ss")
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Yerel Hub'a yazıcı listesi bildirilirken uyarı.");
+        }
+
+        // 2. Dış bir Hub'a bağlıysa oraya da bildir:
         if (_hubConnection == null || _hubConnection.State != HubConnectionState.Connected) return;
 
         try
         {
-            var yazicilar = _yaziciYoneticisi.YukluYazicilariGetir();
             await _hubConnection.InvokeAsync("YazicilariBildir", yazicilar);
             _logger.LogInformation("{Sayi} adet yazıcı Web sistemine bildirildi.", yazicilar.Count);
         }
