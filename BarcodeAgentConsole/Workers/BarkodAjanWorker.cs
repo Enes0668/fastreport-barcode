@@ -99,6 +99,22 @@ public class BarkodAjanWorker : BackgroundService
                 _tcpListener.Start();
                 _aktifTcpPort = denenenPort;
                 _ajanAdi = $"{Environment.MachineName}-{(char)('A' + i)}";
+
+                // EĞER BU PENCERE 2. VEYA DAHA SONRAKİ AJAN İSE (ÖRN: PC-B):
+                // Tek bilgisayarda hastane senaryosunu (A'da barkod yazıcı var, B'de hiç yazıcı yok)
+                // birebir test edebilmek için B bilgisayarını otomatik olarak "Yazıcısız İstemci" modunda başlat!
+                if (i > 0)
+                {
+                    _yaziciYoneticisi.YerelYaziciYokSimulasyonu = true;
+                    _yaziciYoneticisi.UdpPaylasimAcik = false;
+                    _logger.LogWarning("🧪 [HASTANE TEST MODU] Bu pencere '{AjanAdi}' (İstemci Bilgisayar) olarak açıldı: Yerel yazıcılar gizlendi! Sadece ağdan (PC-A'dan) paylaşılan yazıcıları görecek.", _ajanAdi);
+                }
+                else
+                {
+                    // PC-A (1. Bilgisayar): Başlangıçta paylaşım AÇIK veya İsteğe Bağlı
+                    _logger.LogInformation("🖨️ [ANA YAZICI BİLGİSAYARI] Bu pencere '{AjanAdi}' olarak açıldı: Fiziksel barkod yazıcı bu bilgisayara bağlıdır.", _ajanAdi);
+                }
+
                 Console.Title = $"FastReport Barkod Ajanı - {_ajanAdi} ({_yerelIp}:{_aktifTcpPort})";
                 break;
             }
@@ -161,7 +177,8 @@ public class BarkodAjanWorker : BackgroundService
     }
 
     /// <summary>
-    /// 2. KADEME - ADIM 2: Her 5 saniyede bir kendi IP adresini ve bağlı yazıcılarını yerel ağa (UDP) fırlatır.
+    /// 2. KADEME - ADIM 2: Her 2 saniyede bir kendi IP adresini ve bağlı yazıcılarını yerel ağa (UDP) fırlatır
+    /// ve kapanan (sinyali kesilen) diğer bilgisayarların yazıcılarını (7 sn timeout ile) listeden temizler.
     /// </summary>
     private async Task PeriyodikYaziciFirlatmaDongusuAsync(CancellationToken stoppingToken)
     {
@@ -172,20 +189,31 @@ public class BarkodAjanWorker : BackgroundService
         {
             try
             {
+                // 1. Kapanan veya bağlantısı kopan bilgisayarların yazıcılarını temizle (Cache'de kalmasın!)
+                if (_yaziciYoneticisi.ZamanAsiminaUgrayanAgYazicilariniTemizle(TimeSpan.FromSeconds(6)))
+                {
+                    await YazicilariWebEBildirAsync();
+                }
+
+                // 2. Kendi yazıcılarımızı (Paylaşım açıksa) ağa fırlat; paylaşım kapalıysa boş liste fırlat ki karşı taraf anında silsin
+                var gonderilecekYazicilar = _yaziciYoneticisi.UdpPaylasimAcik
+                    ? _yaziciYoneticisi.YerelYazicilariGetir()
+                    : new System.Collections.Generic.List<string>();
+
                 var paket = new AjanPaylasimPaketi
                 {
                     AjanAdi = _ajanAdi,
                     IpAdresi = _yerelIp,
                     TcpPort = _aktifTcpPort,
-                    Yazicilar = _yaziciYoneticisi.YerelYazicilariGetir()
+                    Yazicilar = gonderilecekYazicilar
                 };
 
                 byte[] veri = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(paket));
 
-                // 1. Yerel ağdaki (LAN) diğer bilgisayarlara Broadcast olarak fırlat
+                // Yerel ağdaki (LAN) diğer bilgisayarlara Broadcast olarak fırlat
                 await udpSender.SendAsync(veri, veri.Length, new IPEndPoint(IPAddress.Broadcast, _udpBroadcastPort));
 
-                // 2. Aynı bilgisayarda test yaparken diğer pencerelere (5055, 5056, 5057) doğrudan fırlat
+                // Aynı bilgisayarda test yaparken diğer pencerelere (5055, 5056, 5057) doğrudan fırlat
                 for (int i = 0; i < 4; i++)
                 {
                     int hedefPort = _baslangicTcpPort + i;
@@ -200,7 +228,7 @@ public class BarkodAjanWorker : BackgroundService
                 _logger.LogDebug("UDP yazıcı fırlatma uyarısı: {Hata}", ex.Message);
             }
 
-            await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
+            await Task.Delay(TimeSpan.FromSeconds(2), stoppingToken);
         }
     }
 
@@ -362,6 +390,8 @@ public class BarkodAjanWorker : BackgroundService
             {
                 connectionId = _ajanAdi,
                 yazicilar = yazicilar,
+                yerelYaziciYokModu = _yaziciYoneticisi.YerelYaziciYokSimulasyonu,
+                udpPaylasimAcik = _yaziciYoneticisi.UdpPaylasimAcik,
                 zaman = DateTime.Now.ToString("HH:mm:ss")
             });
         }

@@ -214,10 +214,24 @@ public static class YerelDashboardHtml
             </div>
 
             <div class="card">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 16px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 12px;">
                     <h2 style="margin-bottom:0;">📋 Algılanan Yazıcılar (Yerel + UDP Ağ)</h2>
                     <button onclick="yazicilariYenile()" style="background:none; border:none; color:var(--primary); font-size:12px; cursor:pointer; text-decoration:underline;">Yenile</button>
                 </div>
+
+                <!-- HASTANE A ve B BİLGİSAYARI SİMÜLASYON KONTROLLERİ -->
+                <div style="background:#0b1329; border:1px solid #334155; border-radius:8px; padding:10px 12px; margin-bottom:14px; font-size:12px;">
+                    <div style="font-weight:600; color:#38bdf8; margin-bottom:8px;">🧪 Hastane Cihaz & Paylaşım Simülasyonu (Canlı Test)</div>
+                    <label style="display:flex; align-items:center; gap:8px; cursor:pointer; margin-bottom:6px; color:#e2e8f0;">
+                        <input type="checkbox" id="chkUdpPaylasim" onchange="testModuGuncelle()" checked>
+                        <span>🌐 <b>UDP Paylaşımı Açık</b> (Bu PC'nin yazıcılarını diğer PC'lere yayınla)</span>
+                    </label>
+                    <label style="display:flex; align-items:center; gap:8px; cursor:pointer; color:#e2e8f0;">
+                        <input type="checkbox" id="chkYerelYok" onchange="testModuGuncelle()">
+                        <span>🚫 <b>Bu Bilgisayarda Fiziksel Yazıcı Yok Modu (B Bilgisayarı)</b></span>
+                    </label>
+                </div>
+
                 <div id="yaziciListesi">
                     <p style="color: var(--text-muted); font-size: 13px;">Yükleniyor...</p>
                 </div>
@@ -255,12 +269,23 @@ public static class YerelDashboardHtml
             document.getElementById("statusBadge").className = "status-badge status-online";
             document.getElementById("statusText").innerText = "Gömülü Agent Aktif 🟢";
 
+            if (typeof data.udpPaylasimAcik === "boolean") {
+                document.getElementById("chkUdpPaylasim").checked = data.udpPaylasimAcik;
+            }
+            if (typeof data.yerelYaziciYokModu === "boolean") {
+                document.getElementById("chkYerelYok").checked = data.yerelYaziciYokModu;
+            }
+
             const select = document.getElementById("hedefYazici");
             const mevcutSecim = select.value;
             const listDiv = document.getElementById("yaziciListesi");
 
             select.innerHTML = '<option value="">-- Bu Bilgisayarın Varsayılan Yazıcısı --</option>';
             listDiv.innerHTML = "";
+
+            if (data.yazicilar.length === 0) {
+                listDiv.innerHTML = '<div style="padding:12px; background:#0b1329; border:1px dashed #ef4444; border-radius:8px; color:#f87171; font-size:13px;">⚠️ Bu bilgisayarda yerel yazıcı yok ve şu an ağdan (UDP ile) paylaşılan hiçbir yazıcı algılanmadı!</div>';
+            }
 
             data.yazicilar.forEach(p => {
                 const opt = document.createElement("option");
@@ -327,6 +352,13 @@ public static class YerelDashboardHtml
 
         async function yazicilariYenile() {
             await connection.invoke("YazicilariGetir");
+        }
+
+        async function testModuGuncelle() {
+            const udpPaylasim = document.getElementById("chkUdpPaylasim").checked;
+            const yerelYok = document.getElementById("chkYerelYok").checked;
+            log(`🔧 Simülasyon modu güncelleniyor: UDP Paylaşım=${udpPaylasim ? 'AÇIK' : 'KAPALI'}, Yerel Yazıcı Yok=${yerelYok ? 'EVET' : 'HAYIR'}`, "warn");
+            await connection.invoke("TestModuDegistir", yerelYok, udpPaylasim);
         }
     </script>
 </body>

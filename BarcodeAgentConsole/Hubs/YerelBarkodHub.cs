@@ -33,12 +33,14 @@ public class YerelBarkodHub : Hub
     {
         _logger.LogInformation("🌐 [YEREL HUB] Web tarayıcısı / HBYS istemcisi bağlandı (ConnectionId: {Id})", Context.ConnectionId);
 
-        // Bağlanan web ekranına anında bu bilgisayardaki + ağdan (UDP) gelen tüm yazıcıları gönder
+        // Bağlanan web ekranına anında bu bilgisayardaki + ağdan (UDP) gelen tüm yazıcıları ve simülasyon durumunu gönder
         var yazicilar = _yaziciYoneticisi.YukluYazicilariGetir();
         await Clients.Caller.SendAsync("YazicilarAlindi", new
         {
             connectionId = Context.ConnectionId,
             yazicilar = yazicilar,
+            yerelYaziciYokModu = _yaziciYoneticisi.YerelYaziciYokSimulasyonu,
+            udpPaylasimAcik = _yaziciYoneticisi.UdpPaylasimAcik,
             zaman = DateTime.Now.ToString("HH:mm:ss")
         });
 
@@ -95,8 +97,27 @@ public class YerelBarkodHub : Hub
         {
             connectionId = Context.ConnectionId,
             yazicilar = yazicilar,
+            yerelYaziciYokModu = _yaziciYoneticisi.YerelYaziciYokSimulasyonu,
+            udpPaylasimAcik = _yaziciYoneticisi.UdpPaylasimAcik,
             zaman = DateTime.Now.ToString("HH:mm:ss")
         });
+    }
+
+    /// <summary>
+    /// Tek bilgisayarda A ve B bilgisayarlarını test ederken:
+    /// - "YerelYaziciYokModu" (Bu bilgisayarda fiziksel yazıcı yokmuş gibi davran)
+    /// - "UdpPaylasimAcik" (Bu bilgisayarın yazıcılarını ağdaki diğer bilgisayarlara paylaş/kapat)
+    /// ayarlarını canlı olarak değiştirir.
+    /// </summary>
+    public async Task TestModuDegistir(bool yerelYaziciYokModu, bool udpPaylasimAcik)
+    {
+        _yaziciYoneticisi.YerelYaziciYokSimulasyonu = yerelYaziciYokModu;
+        _yaziciYoneticisi.UdpPaylasimAcik = udpPaylasimAcik;
+
+        _logger.LogInformation("🔧 [TEST MODU GÜNCELLENDİ] YerelYaziciYok={Yok}, UdpPaylasimAcik={Paylasim}",
+            yerelYaziciYokModu, udpPaylasimAcik);
+
+        await YazicilariGetir();
     }
 
     /// <summary>
