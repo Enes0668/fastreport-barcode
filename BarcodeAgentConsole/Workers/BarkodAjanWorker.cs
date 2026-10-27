@@ -218,6 +218,8 @@ public class BarkodAjanWorker : BackgroundService
 
                 // Yerel ağdaki (LAN) diğer bilgisayarlara Broadcast olarak fırlat
                 await udpSender.SendAsync(veri, veri.Length, new IPEndPoint(IPAddress.Broadcast, _udpBroadcastPort));
+                _logger.LogInformation("📡 [UDP YAYINI YAPILDI] {Adet} adet yazıcı ağa ({Port}) fırlatıldı. (Ajan: {AjanAdi}, IP: {Ip}:{TcpPort})", 
+                    gonderilecekYazicilar.Count, _udpBroadcastPort, _ajanAdi, _yerelIp, _aktifTcpPort);
 
                 // Aynı bilgisayarda test yaparken diğer pencerelere (5055, 5056, 5057) doğrudan fırlat
                 for (int i = 0; i < 4; i++)
@@ -272,6 +274,9 @@ public class BarkodAjanWorker : BackgroundService
                 // Kendi gönderdiğimiz paketi yoksay
                 if (paket.TcpPort == _aktifTcpPort && (paket.IpAdresi == _yerelIp || paket.IpAdresi == "127.0.0.1"))
                     continue;
+
+                _logger.LogInformation("📬 [UDP PAKETİ YAKALANDI!] Gönderen: {GonderenAjan} ({Ip}:{Port}), Yazıcı Sayısı: {Sayi}",
+                    paket.AjanAdi, paket.IpAdresi, paket.TcpPort, paket.Yazicilar.Count);
 
                 // 1. ŞABLON SENKRONİZASYONU: Karşı bilgisayarda bizden daha yeni bir şablon var mı?
                 long bizdekiZaman = _yaziciServisi.SablonZamanDamgasiniGetir();
