@@ -98,22 +98,9 @@ public class BarkodAjanWorker : BackgroundService
                 _tcpListener = new TcpListener(IPAddress.Any, denenenPort);
                 _tcpListener.Start();
                 _aktifTcpPort = denenenPort;
-                _ajanAdi = $"{Environment.MachineName}-{(char)('A' + i)}";
+                _ajanAdi = i == 0 ? Environment.MachineName : $"{Environment.MachineName}-{(char)('A' + i)}";
 
-                // EĞER BU PENCERE 2. VEYA DAHA SONRAKİ AJAN İSE (ÖRN: PC-B):
-                // Tek bilgisayarda hastane senaryosunu (A'da barkod yazıcı var, B'de hiç yazıcı yok)
-                // birebir test edebilmek için B bilgisayarını otomatik olarak "Yazıcısız İstemci" modunda başlat!
-                if (i > 0)
-                {
-                    _yaziciYoneticisi.YerelYaziciYokSimulasyonu = true;
-                    _yaziciYoneticisi.UdpPaylasimAcik = false;
-                    _logger.LogWarning("🧪 [HASTANE TEST MODU] Bu pencere '{AjanAdi}' (İstemci Bilgisayar) olarak açıldı: Yerel yazıcılar gizlendi! Sadece ağdan (PC-A'dan) paylaşılan yazıcıları görecek.", _ajanAdi);
-                }
-                else
-                {
-                    // PC-A (1. Bilgisayar): Başlangıçta paylaşım AÇIK veya İsteğe Bağlı
-                    _logger.LogInformation("🖨️ [ANA YAZICI BİLGİSAYARI] Bu pencere '{AjanAdi}' olarak açıldı: Fiziksel barkod yazıcı bu bilgisayara bağlıdır.", _ajanAdi);
-                }
+                _logger.LogInformation("🚀 [AJAN BAŞLATILDI] Bilgisayar: '{AjanAdi}', Yerel Port: {Port}", _ajanAdi, _aktifTcpPort);
 
                 Console.Title = $"FastReport Barkod Ajanı - {_ajanAdi} ({_yerelIp}:{_aktifTcpPort})";
                 break;
@@ -158,6 +145,24 @@ public class BarkodAjanWorker : BackgroundService
             var istek = JsonSerializer.Deserialize<AgBaskiIstekPaketi>(json);
             if (istek == null) return;
 
+            // 1. İŞLEM: Karşı bilgisayar bizdeki güncel .frx şablonunu istiyorsa:
+            if (istek.IslemTuru == "SablonTalep")
+            {
+                string sablonIcerik = _yaziciServisi.SablonIceriginiGetir();
+                long zamanDamgasi = _yaziciServisi.SablonZamanDamgasiniGetir();
+
+                var sablonPaketi = new
+                {
+                    ZamanDamgasi = zamanDamgasi,
+                    Icerik = sablonIcerik
+                };
+
+                await writer.WriteLineAsync(JsonSerializer.Serialize(sablonPaketi));
+                _logger.LogInformation("📤 [ŞABLON GÖNDERİLDİ] {Gonderen} ajanı bizdeki güncel .frx şablonunu indirdi.", istek.GonderenAjan);
+                return;
+            }
+
+            // 2. İŞLEM: Normal Ağ Baskı İsteği:
             _logger.LogInformation("📥 [AĞDAN BASKI GELDİ] Gönderen: {Gonderen} -> İstek #{IstekId}, Hedef Yazıcı: '{Yazici}'",
                 istek.GonderenAjan, istek.IstekId, istek.HedefYazici);
 
@@ -205,7 +210,8 @@ public class BarkodAjanWorker : BackgroundService
                     AjanAdi = _ajanAdi,
                     IpAdresi = _yerelIp,
                     TcpPort = _aktifTcpPort,
-                    Yazicilar = gonderilecekYazicilar
+                    Yazicilar = gonderilecekYazicilar,
+                    SablonZamanDamgasi = _yaziciServisi.SablonZamanDamgasiniGetir()
                 };
 
                 byte[] veri = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(paket));
@@ -267,7 +273,14 @@ public class BarkodAjanWorker : BackgroundService
                 if (paket.TcpPort == _aktifTcpPort && (paket.IpAdresi == _yerelIp || paket.IpAdresi == "127.0.0.1"))
                     continue;
 
-                // Diğer bilgisayardan gelen yazıcıları listeye ekle
+                // 1. ŞABLON SENKRONİZASYONU: Karşı bilgisayarda bizden daha yeni bir şablon var mı?
+                long bizdekiZaman = _yaziciServisi.SablonZamanDamgasiniGetir();
+                if (paket.SablonZamanDamgasi > bizdekiZaman)
+                {
+                    _ = Task.Run(() => AgdakiGuncelSablonuIndirAsync(paket.IpAdresi, paket.TcpPort, paket.AjanAdi, paket.SablonZamanDamgasi));
+                }
+
+                // 2. YAZICI LİSTESİ: Diğer bilgisayardan gelen yazıcıları listeye ekle
                 bool yeniYaziciEklendi = _yaziciYoneticisi.AgYazicilariniGuncelle(paket);
                 if (yeniYaziciEklendi)
                 {
@@ -283,6 +296,52 @@ public class BarkodAjanWorker : BackgroundService
         catch (Exception ex)
         {
             _logger.LogWarning("UDP Dinleyici ({Port}) uyarısı: {Hata}", port, ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Ağdaki başka bir bilgisayarda (örn. tasarımcının kaydettiği PC'de) daha yeni bir .frx şablonu algılandığında,
+    /// TCP üzerinden o şablonu kayıpsız indirir ve yerel klasöründeki etiket_sablonu.frx dosyasını günceller.
+    /// </summary>
+    private async Task AgdakiGuncelSablonuIndirAsync(string hedefIp, int hedefPort, string kaynakAjan, long yeniZamanDamgasi)
+    {
+        try
+        {
+            using var tcpClient = new TcpClient();
+            await tcpClient.ConnectAsync(hedefIp, hedefPort);
+
+            using var stream = tcpClient.GetStream();
+            using var writer = new StreamWriter(stream, Encoding.UTF8) { AutoFlush = true };
+            using var reader = new StreamReader(stream, Encoding.UTF8);
+
+            var talepPaketi = new AgBaskiIstekPaketi
+            {
+                GonderenAjan = _ajanAdi,
+                IslemTuru = "SablonTalep"
+            };
+
+            await writer.WriteLineAsync(JsonSerializer.Serialize(talepPaketi));
+
+            string? gelenJson = await reader.ReadLineAsync();
+            if (string.IsNullOrWhiteSpace(gelenJson)) return;
+
+            using var doc = JsonDocument.Parse(gelenJson);
+            if (doc.RootElement.TryGetProperty("Icerik", out var icerikElem))
+            {
+                string xmlIcerik = icerikElem.GetString() ?? string.Empty;
+                if (!string.IsNullOrWhiteSpace(xmlIcerik))
+                {
+                    bool guncellendi = _yaziciServisi.SablonuGuncelle(xmlIcerik, yeniZamanDamgasi);
+                    if (guncellendi)
+                    {
+                        _logger.LogInformation("✨ [ŞABLON EŞİTLENDİ] {KaynakAjan} bilgisayarındaki yeni .frx şablonu bu bilgisayara otomatik eşitlendi!", kaynakAjan);
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug("Şablon senkronizasyonu denenirken uyarı: {Hata}", ex.Message);
         }
     }
 

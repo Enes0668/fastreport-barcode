@@ -20,6 +20,58 @@ public class BarkodYaziciServisi : IYaziciServisi
     private readonly ILogger<BarkodYaziciServisi> _logger;
 
     public string VarsayilanYazici { get; set; }
+    public string SablonYolu => _sablonYolu;
+
+    public long SablonZamanDamgasiniGetir()
+    {
+        try
+        {
+            if (File.Exists(_sablonYolu))
+            {
+                return File.GetLastWriteTimeUtc(_sablonYolu).Ticks;
+            }
+        }
+        catch { }
+        return 0;
+    }
+
+    public string SablonIceriginiGetir()
+    {
+        try
+        {
+            if (File.Exists(_sablonYolu))
+            {
+                return File.ReadAllText(_sablonYolu, Encoding.UTF8);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Şablon içeriği okunurken hata oluştu: {Yol}", _sablonYolu);
+        }
+        return string.Empty;
+    }
+
+    public bool SablonuGuncelle(string yeniFrxXmlIcerik, long yeniZamanDamgasi)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(yeniFrxXmlIcerik)) return false;
+
+            File.WriteAllText(_sablonYolu, yeniFrxXmlIcerik, Encoding.UTF8);
+            if (yeniZamanDamgasi > 0)
+            {
+                File.SetLastWriteTimeUtc(_sablonYolu, new DateTime(yeniZamanDamgasi, DateTimeKind.Utc));
+            }
+
+            _logger.LogInformation("🔄 [ŞABLON GÜNCELLENDİ] Ağdan gelen yeni .frx şablonu başarıyla diske kaydedildi! ({Yol})", _sablonYolu);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Ağdan gelen şablon kaydedilirken hata oluştu: {Yol}", _sablonYolu);
+            return false;
+        }
+    }
 
     public BarkodYaziciServisi(
         IConfiguration config,

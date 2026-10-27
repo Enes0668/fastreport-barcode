@@ -6,7 +6,7 @@
     <Nullable>enable</Nullable>
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
-    <DefaultItemExcludes>$(DefaultItemExcludes);BarcodeAgentConsole\**</DefaultItemExcludes>
+    <DefaultItemExcludes>$(DefaultItemExcludes);BarcodeAgentConsole\**;BarcodeTestServer\**</DefaultItemExcludes>
   </PropertyGroup>
 
   <ItemGroup>

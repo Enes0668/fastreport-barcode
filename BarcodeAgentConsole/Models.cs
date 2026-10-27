@@ -28,7 +28,7 @@ public class BarkodSonucModel
 
 /// <summary>
 /// 2. Kademe: A ve B bilgisayarlarındaki Agent'ların yerel ağ (LAN) üzerinden
-/// her 5 saniyede bir birbirlerine fırlattığı yazıcı paylaşım paketi.
+/// her 2 saniyede bir birbirlerine fırlattığı yazıcı ve şablon paylaşım paketi.
 /// </summary>
 public class AjanPaylasimPaketi
 {
@@ -36,11 +36,17 @@ public class AjanPaylasimPaketi
     public string IpAdresi { get; set; } = string.Empty;
     public int TcpPort { get; set; }
     public List<string> Yazicilar { get; set; } = new();
+
+    /// <summary>
+    /// Bu bilgisayardaki etiket_sablonu.frx dosyasının son değiştirilme zamanı (UTC Ticks).
+    /// Ağdaki diğer bilgisayarlar bu değere bakarak daha yeni bir şablon olup olmadığını anlar.
+    /// </summary>
+    public long SablonZamanDamgasi { get; set; }
 }
 
 /// <summary>
 /// 2. Kademe: B bilgisayarındaki Agent'ın, A bilgisayarındaki Agent'a
-/// yerel ağ üzerinden gönderdiği yazdırma isteği paketi.
+/// yerel ağ üzerinden gönderdiği yazdırma isteği veya şablon çekme paketi.
 /// </summary>
 public class AgBaskiIstekPaketi
 {
@@ -48,4 +54,9 @@ public class AgBaskiIstekPaketi
     public string IstekId { get; set; } = string.Empty;
     public string HedefYazici { get; set; } = string.Empty;
     public Dictionary<string, string>? Parametreler { get; set; }
+
+    /// <summary>
+    /// Eğer "SablonTalep" ise karşı bilgisayar .frx dosyasının içeriğini döndürür.
+    /// </summary>
+    public string IslemTuru { get; set; } = "Baski";
 }
