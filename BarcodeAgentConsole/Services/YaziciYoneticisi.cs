@@ -16,7 +16,7 @@ public class YaziciYoneticisi : IYaziciYoneticisi
     private readonly ConcurrentDictionary<string, (string AjanAdi, string Ip, int Port, string GercekYaziciAdi, DateTime SonGorulme)> _agYazicilari = new();
 
     public bool YerelYaziciYokSimulasyonu { get; set; } = false;
-    public bool UdpPaylasimAcik { get; set; } = true;
+    public bool AgPaylasimAcik { get; set; } = true;
 
     public YaziciYoneticisi(ILogger<YaziciYoneticisi> logger)
     {
@@ -114,7 +114,7 @@ public class YaziciYoneticisi : IYaziciYoneticisi
     }
 
     /// <summary>
-    /// Belirli bir süre (örn. 7 saniye) boyunca UDP sinyali gelmeyen (kapanan) bilgisayarların yazıcılarını listeden siler (Cache'de kalmasını önler).
+    /// Belirli bir süre (örn. 45 saniye) boyunca TCP sinyali gelmeyen (kapanan) bilgisayarların yazıcılarını listeden siler (Cache'de kalmasını önler).
     /// </summary>
     public bool ZamanAsiminaUgrayanAgYazicilariniTemizle(TimeSpan zamanAsimi)
     {

@@ -33,7 +33,7 @@ builder.Services.AddCors(options =>
 builder.Services.AddSingleton<IYaziciYoneticisi, YaziciYoneticisi>();
 builder.Services.AddSingleton<IYaziciServisi, BarkodYaziciServisi>();
 
-// 3. Arka Plan İşçisini Kaydet (UDP Yazıcı Paylaşımı ve TCP Ağ Baskı Dinleyicisi)
+// 3. Arka Plan İşçisini Kaydet (TCP Ağ Taraması ve TCP Ağ Baskı Dinleyicisi)
 builder.Services.AddHostedService<BarkodAjanWorker>();
 
 // Boş yerel HTTP/SignalR portunu otomatik belirle (Varsayılan: 5000, doluysa 5001, 5002...)
@@ -252,7 +252,7 @@ public static class YerelDashboardHtml
             .build();
 
         connection.on("YazicilarAlindi", (data) => {
-            log(`🎉 Agent'tan ${data.yazicilar.length} adet yazıcı alındı (Yerel + UDP Paylaşımlı).`, "success");
+            log(`🎉 Agent'tan ${data.yazicilar.length} adet yazıcı alındı (Yerel + TCP Paylaşımlı).`, "success");
             document.getElementById("statusBadge").className = "status-badge status-online";
             document.getElementById("statusText").innerText = "Gömülü Agent Aktif 🟢";
 
@@ -264,7 +264,7 @@ public static class YerelDashboardHtml
             listDiv.innerHTML = "";
 
             if (data.yazicilar.length === 0) {
-                listDiv.innerHTML = '<div style="padding:12px; background:#0b1329; border:1px dashed #ef4444; border-radius:8px; color:#f87171; font-size:13px;">⚠️ Bu bilgisayarda yerel yazıcı yok ve şu an ağdan (UDP ile) paylaşılan hiçbir yazıcı algılanmadı!</div>';
+                listDiv.innerHTML = '<div style="padding:12px; background:#0b1329; border:1px dashed #ef4444; border-radius:8px; color:#f87171; font-size:13px;">⚠️ Bu bilgisayarda yerel yazıcı yok ve şu an ağdan paylaşılan hiçbir yazıcı algılanmadı!</div>';
             }
 
             data.yazicilar.forEach(p => {
@@ -276,7 +276,7 @@ public static class YerelDashboardHtml
                 const isAg = p.startsWith("[");
                 const item = document.createElement("div");
                 item.className = "printer-item";
-                item.innerHTML = `<span>${isAg ? '🌐' : '🖨️'} ${p}</span> <span style="color:${isAg ? '#38bdf8' : '#10b981'}; font-size:11px;">${isAg ? 'Ağ Yazıcısı (UDP)' : 'Yerel'}</span>`;
+                item.innerHTML = `<span>${isAg ? '🌐' : '🖨️'} ${p}</span> <span style="color:${isAg ? '#38bdf8' : '#10b981'}; font-size:11px;">${isAg ? 'Ağ Yazıcısı (TCP)' : 'Yerel'}</span>`;
                 listDiv.appendChild(item);
             });
 

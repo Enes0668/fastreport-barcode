@@ -40,7 +40,7 @@ public class YerelBarkodHub : Hub
             connectionId = Context.ConnectionId,
             yazicilar = yazicilar,
             yerelYaziciYokModu = _yaziciYoneticisi.YerelYaziciYokSimulasyonu,
-            udpPaylasimAcik = _yaziciYoneticisi.UdpPaylasimAcik,
+            agPaylasimAcik = _yaziciYoneticisi.AgPaylasimAcik,
             zaman = DateTime.Now.ToString("HH:mm:ss")
         });
 
@@ -98,7 +98,7 @@ public class YerelBarkodHub : Hub
             connectionId = Context.ConnectionId,
             yazicilar = yazicilar,
             yerelYaziciYokModu = _yaziciYoneticisi.YerelYaziciYokSimulasyonu,
-            udpPaylasimAcik = _yaziciYoneticisi.UdpPaylasimAcik,
+            agPaylasimAcik = _yaziciYoneticisi.AgPaylasimAcik,
             zaman = DateTime.Now.ToString("HH:mm:ss")
         });
     }
@@ -106,16 +106,16 @@ public class YerelBarkodHub : Hub
     /// <summary>
     /// Tek bilgisayarda A ve B bilgisayarlarını test ederken:
     /// - "YerelYaziciYokModu" (Bu bilgisayarda fiziksel yazıcı yokmuş gibi davran)
-    /// - "UdpPaylasimAcik" (Bu bilgisayarın yazıcılarını ağdaki diğer bilgisayarlara paylaş/kapat)
+    /// - "agPaylasimAcik" (Bu bilgisayarın yazıcılarını ağdaki diğer bilgisayarlara paylaş/kapat)
     /// ayarlarını canlı olarak değiştirir.
     /// </summary>
-    public async Task TestModuDegistir(bool yerelYaziciYokModu, bool udpPaylasimAcik)
+    public async Task TestModuDegistir(bool yerelYaziciYokModu, bool agPaylasimAcik)
     {
         _yaziciYoneticisi.YerelYaziciYokSimulasyonu = yerelYaziciYokModu;
-        _yaziciYoneticisi.UdpPaylasimAcik = udpPaylasimAcik;
+        _yaziciYoneticisi.AgPaylasimAcik = agPaylasimAcik;
 
-        _logger.LogInformation("🔧 [TEST MODU GÜNCELLENDİ] YerelYaziciYok={Yok}, UdpPaylasimAcik={Paylasim}",
-            yerelYaziciYokModu, udpPaylasimAcik);
+        _logger.LogInformation("🔧 [TEST MODU GÜNCELLENDİ] YerelYaziciYok={Yok}, AgPaylasimAcik={Paylasim}",
+            yerelYaziciYokModu, agPaylasimAcik);
 
         await YazicilariGetir();
     }

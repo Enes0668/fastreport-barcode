@@ -16,9 +16,9 @@ public interface IYaziciYoneticisi
     bool YerelYaziciYokSimulasyonu { get; set; }
 
     /// <summary>
-    /// Bu bilgisayarın kendi yerel yazıcılarını UDP ile ağdaki diğer bilgisayarlara paylaşıp paylaşmayacağını belirler.
+    /// Bu bilgisayarın kendi yerel yazıcılarını yerel ağdaki diğer bilgisayarlara paylaşıp paylaşmayacağını belirler.
     /// </summary>
-    bool UdpPaylasimAcik { get; set; }
+    bool AgPaylasimAcik { get; set; }
 
     List<string> YerelYazicilariGetir();
     List<string> YukluYazicilariGetir();

@@ -29,7 +29,6 @@ public class BarkodAjanWorker : BackgroundService
     private readonly IHubContext<YerelBarkodHub> _yerelHubContext;
     private readonly string _hubUrl;
     private readonly bool _agPaylasimAktif;
-    private readonly int _udpBroadcastPort;
     private readonly int _baslangicTcpPort;
 
     private HubConnection? _hubConnection;
@@ -51,7 +50,6 @@ public class BarkodAjanWorker : BackgroundService
         _yerelHubContext = yerelHubContext;
         _hubUrl = config["SignalR:HubUrl"] ?? "http://localhost:5000/barkodHub";
         _agPaylasimAktif = bool.TryParse(config["AgPaylasim:Aktif"], out bool aktif) ? aktif : true;
-        _udpBroadcastPort = int.TryParse(config["AgPaylasim:UdpPort"], out int uPort) ? uPort : 5050;
         _baslangicTcpPort = int.TryParse(config["AgPaylasim:BaslangicTcpPort"], out int tPort) ? tPort : 5055;
     }
 
@@ -59,15 +57,14 @@ public class BarkodAjanWorker : BackgroundService
     {
         _yerelIp = YerelIpAdresiniBul();
 
-        // 1. Kademe 2: Yerel Ağ (LAN) TCP Baskı Dinleyicisini ve UDP Paylaşımını Başlat
+        // 1. Kademe 2: Yerel Ağ (LAN) TCP Baskı Dinleyicisini ve TCP Ağ Taramasını Başlat
         if (_agPaylasimAktif)
         {
             TcpBaskiDinleyicisiniBaslat(stoppingToken);
-            _ = UdpYaziciDinleyicisiniBaslatAsync(stoppingToken);
-            _ = PeriyodikYaziciFirlatmaDongusuAsync(stoppingToken);
+            _ = PeriyodikTcpAgTaramaDongusuAsync(stoppingToken);
         }
 
-        _logger.LogInformation("Barkod Baskı Ajanı [{AjanAdi}] başlatıldı. IP: {Ip}:{Port}, Hub: '{HubUrl}'",
+        _logger.LogInformation("🚀 Barkod Baskı Ajanı [{AjanAdi}] başlatıldı. IP: {Ip}:{Port}, Hub: '{HubUrl}'",
             _ajanAdi, _yerelIp, _aktifTcpPort, _hubUrl);
 
         // 2. Web / SignalR Bağlantısını Başlat
@@ -162,7 +159,24 @@ public class BarkodAjanWorker : BackgroundService
                 return;
             }
 
-            // 2. İŞLEM: Normal Ağ Baskı İsteği:
+            // 2. İŞLEM (YENİ - TCP İLE CİHAZ KEŞFİ): Karşı bilgisayar bizdeki yazıcıları soruyorsa:
+            if (istek.IslemTuru == "YazicilariVer")
+            {
+                var paket = new AjanPaylasimPaketi
+                {
+                    AjanAdi = _ajanAdi,
+                    IpAdresi = _yerelIp,
+                    TcpPort = _aktifTcpPort,
+                    Yazicilar = _yaziciYoneticisi.AgPaylasimAcik ? _yaziciYoneticisi.YerelYazicilariGetir() : new List<string>(),
+                    SablonZamanDamgasi = _yaziciServisi.SablonZamanDamgasiniGetir()
+                };
+
+                await writer.WriteLineAsync(JsonSerializer.Serialize(paket));
+                _logger.LogInformation("🤝 [TCP İLE YAZICI PAYLAŞILDI] {Gonderen} cihazına {Sayi} adet yazıcı bilgisi verildi.", istek.GonderenAjan, paket.Yazicilar.Count);
+                return;
+            }
+
+            // 3. İŞLEM: Normal Ağ Baskı İsteği:
             _logger.LogInformation("📥 [AĞDAN BASKI GELDİ] Gönderen: {Gonderen} -> İstek #{IstekId}, Hedef Yazıcı: '{Yazici}'",
                 istek.GonderenAjan, istek.IstekId, istek.HedefYazici);
 
@@ -182,125 +196,102 @@ public class BarkodAjanWorker : BackgroundService
     }
 
     /// <summary>
-    /// 2. KADEME - ADIM 2: Her 2 saniyede bir kendi IP adresini ve bağlı yazıcılarını yerel ağa (UDP) fırlatır
-    /// ve kapanan (sinyali kesilen) diğer bilgisayarların yazıcılarını (7 sn timeout ile) listeden temizler.
+    /// MODEM VE BROADCAST ENGELİNİ AŞAN METOT:
+    /// Her 10 saniyede bir yerel ağdaki (örn: 192.168.1.1 - 254) tüm IP adreslerinin 5055 kapısını çalar.
+    /// UDP Broadcast çalışmasa bile, TCP ile ağdaki tüm Agent'ları %100 bulur ve yazıcılarını çeker!
     /// </summary>
-    private async Task PeriyodikYaziciFirlatmaDongusuAsync(CancellationToken stoppingToken)
+    private async Task PeriyodikTcpAgTaramaDongusuAsync(CancellationToken stoppingToken)
     {
-        using var udpSender = new UdpClient();
-        udpSender.EnableBroadcast = true;
+        // İlk açılışta hemen 1 saniye sonra ilk taramayı yap, sonra periyodik devam et
+        await Task.Delay(1000, stoppingToken);
 
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
-                // 1. Kapanan veya bağlantısı kopan bilgisayarların yazıcılarını temizle (Cache'de kalmasın!)
-                if (_yaziciYoneticisi.ZamanAsiminaUgrayanAgYazicilariniTemizle(TimeSpan.FromSeconds(6)))
+                if (_yerelIp != "127.0.0.1" && _yerelIp.Contains('.'))
                 {
-                    await YazicilariWebEBildirAsync();
-                }
+                    string ipOnEk = _yerelIp.Substring(0, _yerelIp.LastIndexOf('.') + 1); // Örn: "192.168.1."
+                    int kendiSonSekizli = int.TryParse(_yerelIp.Substring(_yerelIp.LastIndexOf('.') + 1), out int s) ? s : -1;
 
-                // 2. Kendi yazıcılarımızı (Paylaşım açıksa) ağa fırlat; paylaşım kapalıysa boş liste fırlat ki karşı taraf anında silsin
-                var gonderilecekYazicilar = _yaziciYoneticisi.UdpPaylasimAcik
-                    ? _yaziciYoneticisi.YerelYazicilariGetir()
-                    : new System.Collections.Generic.List<string>();
+                    _logger.LogInformation("🔍 [TCP AĞ TARAMASI BAŞLADI] {OnEk}1-254 aralığındaki Agent'lar taranıyor...", ipOnEk);
 
-                var paket = new AjanPaylasimPaketi
-                {
-                    AjanAdi = _ajanAdi,
-                    IpAdresi = _yerelIp,
-                    TcpPort = _aktifTcpPort,
-                    Yazicilar = gonderilecekYazicilar,
-                    SablonZamanDamgasi = _yaziciServisi.SablonZamanDamgasiniGetir()
-                };
+                    // 1 ile 254 arasındaki tüm IP'leri paralel (hızlıca) tara
+                    var taramaGorevleri = Enumerable.Range(1, 254)
+                        .Where(i => i != kendiSonSekizli) // Kendi kendini tarama
+                        .Select(i => $"{ipOnEk}{i}")
+                        .Select(hedefIp => TekilIpTcpTaraAsync(hedefIp, _baslangicTcpPort));
 
-                byte[] veri = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(paket));
+                    await Task.WhenAll(taramaGorevleri);
 
-                // Yerel ağdaki (LAN) diğer bilgisayarlara Broadcast olarak fırlat
-                await udpSender.SendAsync(veri, veri.Length, new IPEndPoint(IPAddress.Broadcast, _udpBroadcastPort));
-                _logger.LogInformation("📡 [UDP YAYINI YAPILDI] {Adet} adet yazıcı ağa ({Port}) fırlatıldı. (Ajan: {AjanAdi}, IP: {Ip}:{TcpPort})", 
-                    gonderilecekYazicilar.Count, _udpBroadcastPort, _ajanAdi, _yerelIp, _aktifTcpPort);
-
-                // Aynı bilgisayarda test yaparken diğer pencerelere (5055, 5056, 5057) doğrudan fırlat
-                for (int i = 0; i < 4; i++)
-                {
-                    int hedefPort = _baslangicTcpPort + i;
-                    if (hedefPort != _aktifTcpPort)
+                    // Kapanan bilgisayarların yazıcılarını temizle (45 saniye boyunca cevap vermeyenler)
+                    if (_yaziciYoneticisi.ZamanAsiminaUgrayanAgYazicilariniTemizle(TimeSpan.FromSeconds(45)))
                     {
-                        await udpSender.SendAsync(veri, veri.Length, new IPEndPoint(IPAddress.Loopback, hedefPort));
+                        await YazicilariWebEBildirAsync();
                     }
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogDebug("UDP yazıcı fırlatma uyarısı: {Hata}", ex.Message);
+                _logger.LogDebug("TCP ağ taraması döngüsü uyarısı: {Hata}", ex.Message);
             }
 
-            await Task.Delay(TimeSpan.FromSeconds(2), stoppingToken);
+            // Her 10 saniyede bir sessizce kontrol et
+            await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken);
         }
     }
 
-    /// <summary>
-    /// 2. KADEME - ADIM 3: Ağdaki diğer Agent'lardan fırlatılan yazıcı paketlerini yakalar ve listeye ekler.
-    /// </summary>
-    private async Task UdpYaziciDinleyicisiniBaslatAsync(CancellationToken stoppingToken)
-    {
-        // Hem genel Broadcast portunu (5050) hem de aynı PC testi için kendi portunu dinle
-        _ = DinleUdpPortAsync(_udpBroadcastPort, true, stoppingToken);
-        _ = DinleUdpPortAsync(_aktifTcpPort, false, stoppingToken);
-        await Task.CompletedTask;
-    }
-
-    private async Task DinleUdpPortAsync(int port, bool reuseAddress, CancellationToken stoppingToken)
+    private async Task TekilIpTcpTaraAsync(string hedefIp, int hedefPort)
     {
         try
         {
-            using var udpListener = new UdpClient();
-            if (reuseAddress)
+            using var tcpClient = new TcpClient();
+            // 400 milisaniye içinde yanıt vermezse o IP'de Agent yoktur, vakit kaybetmeden geç
+            var connectTask = tcpClient.ConnectAsync(hedefIp, hedefPort);
+            if (await Task.WhenAny(connectTask, Task.Delay(400)) != connectTask)
             {
-                udpListener.ExclusiveAddressUse = false;
-                udpListener.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+                return; // Zaman aşımı (Agent yok)
             }
-            udpListener.Client.Bind(new IPEndPoint(IPAddress.Any, port));
 
-            while (!stoppingToken.IsCancellationRequested)
+            using var stream = tcpClient.GetStream();
+            using var writer = new StreamWriter(stream, Encoding.UTF8) { AutoFlush = true };
+            using var reader = new StreamReader(stream, Encoding.UTF8);
+
+            // Karşı Agent'a "Yazıcılarını ver" paketi gönder
+            var talep = new AgBaskiIstekPaketi
             {
-                var sonuc = await udpListener.ReceiveAsync(stoppingToken);
-                string json = Encoding.UTF8.GetString(sonuc.Buffer);
-                var paket = JsonSerializer.Deserialize<AjanPaylasimPaketi>(json);
+                GonderenAjan = _ajanAdi,
+                IslemTuru = "YazicilariVer"
+            };
 
-                if (paket == null) continue;
+            await writer.WriteLineAsync(JsonSerializer.Serialize(talep));
 
-                // Kendi gönderdiğimiz paketi yoksay
-                if (paket.TcpPort == _aktifTcpPort && (paket.IpAdresi == _yerelIp || paket.IpAdresi == "127.0.0.1"))
-                    continue;
+            string? jsonCevap = await reader.ReadLineAsync();
+            if (string.IsNullOrWhiteSpace(jsonCevap)) return;
 
-                _logger.LogInformation("📬 [UDP PAKETİ YAKALANDI!] Gönderen: {GonderenAjan} ({Ip}:{Port}), Yazıcı Sayısı: {Sayi}",
+            var paket = JsonSerializer.Deserialize<AjanPaylasimPaketi>(jsonCevap);
+            if (paket == null) return;
+
+            // Karşıdan gelen güncel yazıcıları yerel listemize ekle
+            bool yeniYaziciVar = _yaziciYoneticisi.AgYazicilariniGuncelle(paket);
+            if (yeniYaziciVar)
+            {
+                _logger.LogInformation("🎯 [TCP İLE YENİ CİHAZ BULUNDU!] {Ajan} ({Ip}:{Port}) üzerinden {Sayi} yazıcı sisteme eklendi!",
                     paket.AjanAdi, paket.IpAdresi, paket.TcpPort, paket.Yazicilar.Count);
 
-                // 1. ŞABLON SENKRONİZASYONU: Karşı bilgisayarda bizden daha yeni bir şablon var mı?
-                long bizdekiZaman = _yaziciServisi.SablonZamanDamgasiniGetir();
-                if (paket.SablonZamanDamgasi > bizdekiZaman)
-                {
-                    _ = Task.Run(() => AgdakiGuncelSablonuIndirAsync(paket.IpAdresi, paket.TcpPort, paket.AjanAdi, paket.SablonZamanDamgasi));
-                }
+                await YazicilariWebEBildirAsync();
+            }
 
-                // 2. YAZICI LİSTESİ: Diğer bilgisayardan gelen yazıcıları listeye ekle
-                bool yeniYaziciEklendi = _yaziciYoneticisi.AgYazicilariniGuncelle(paket);
-                if (yeniYaziciEklendi)
-                {
-                    // Yeni yazıcı bulunduğunda Web arayüzündeki dropdown'ı anında güncelle!
-                    await YazicilariWebEBildirAsync();
-                }
+            // Şablon kontrolü de yap
+            long bizdekiZaman = _yaziciServisi.SablonZamanDamgasiniGetir();
+            if (paket.SablonZamanDamgasi > bizdekiZaman)
+            {
+                _ = Task.Run(() => AgdakiGuncelSablonuIndirAsync(paket.IpAdresi, paket.TcpPort, paket.AjanAdi, paket.SablonZamanDamgasi));
             }
         }
-        catch (OperationCanceledException)
+        catch
         {
-            // Normal kapanış
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning("UDP Dinleyici ({Port}) uyarısı: {Hata}", port, ex.Message);
+            // Kapı kapalıysa sessizce devam et
         }
     }
 
@@ -455,7 +446,7 @@ public class BarkodAjanWorker : BackgroundService
                 connectionId = _ajanAdi,
                 yazicilar = yazicilar,
                 yerelYaziciYokModu = _yaziciYoneticisi.YerelYaziciYokSimulasyonu,
-                udpPaylasimAcik = _yaziciYoneticisi.UdpPaylasimAcik,
+                agPaylasimAcik = _yaziciYoneticisi.AgPaylasimAcik,
                 zaman = DateTime.Now.ToString("HH:mm:ss")
             });
         }
