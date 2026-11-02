@@ -36,6 +36,7 @@ public class BarkodAjanWorker : BackgroundService
     private int _aktifTcpPort;
     private string _ajanAdi = "PC-A";
     private string _yerelIp = "127.0.0.1";
+    private List<string> _oncekiYerelYazicilar = new();
 
     public BarkodAjanWorker(
         ILogger<BarkodAjanWorker> logger,
@@ -209,6 +210,16 @@ public class BarkodAjanWorker : BackgroundService
         {
             try
             {
+                // 1. Yerel donanım kontrolü: Bir yazıcının USB fişi takıldı mı veya çıkarıldı mı?
+                var guncelYerel = _yaziciYoneticisi.YerelYazicilariGetir();
+                if (!_oncekiYerelYazicilar.SequenceEqual(guncelYerel))
+                {
+                    _oncekiYerelYazicilar = guncelYerel;
+                    _logger.LogInformation("🔌 [DONANIM GÜNCELLEMESİ] Yerel yazıcı takıldı veya çıkarıldı. Anlık aktif: {Sayi} adet.", guncelYerel.Count);
+                    await YazicilariWebEBildirAsync();
+                }
+
+                // 2. Ağdaki diğer bilgisayarları tara
                 if (_yerelIp != "127.0.0.1" && _yerelIp.Contains('.'))
                 {
                     string ipOnEk = _yerelIp.Substring(0, _yerelIp.LastIndexOf('.') + 1); // Örn: "192.168.1."

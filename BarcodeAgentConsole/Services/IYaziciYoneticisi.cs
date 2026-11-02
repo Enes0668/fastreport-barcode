@@ -25,7 +25,14 @@ public interface IYaziciYoneticisi
     /// </summary>
     bool SanalYazicilariFiltrele { get; set; }
 
+    /// <summary>
+    /// Sadece bilgisayara fiziksel olarak takılı ve açık (Çevrimiçi / Online) olan yazıcıların listelenmesini sağlar.
+    /// Fişi çekilen yazıcılar otomatik olarak gizlenir.
+    /// </summary>
+    bool SadeceCevrimiciYazicilar { get; set; }
+
     bool GecerliYaziciMi(string yaziciAdi);
+    bool YaziciCevrimiciMi(string yaziciAdi);
 
     List<string> YerelYazicilariGetir();
     List<string> YukluYazicilariGetir();

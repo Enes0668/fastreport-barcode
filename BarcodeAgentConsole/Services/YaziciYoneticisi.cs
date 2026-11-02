@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Drawing.Printing;
 using System.Linq;
+using System.Runtime.InteropServices;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
@@ -19,6 +20,7 @@ public class YaziciYoneticisi : IYaziciYoneticisi
     public bool YerelYaziciYokSimulasyonu { get; set; } = false;
     public bool AgPaylasimAcik { get; set; } = true;
     public bool SanalYazicilariFiltrele { get; set; } = true;
+    public bool SadeceCevrimiciYazicilar { get; set; } = true;
 
     private static readonly string[] SanalYaziciKelimeleri = new[]
     {
@@ -40,16 +42,130 @@ public class YaziciYoneticisi : IYaziciYoneticisi
         {
             SanalYazicilariFiltrele = filtre;
         }
+
+        if (bool.TryParse(config["Printer:SadeceCevrimiciYazicilar"], out bool cevrimici))
+        {
+            SadeceCevrimiciYazicilar = cevrimici;
+        }
     }
 
     public bool GecerliYaziciMi(string yaziciAdi)
     {
         if (string.IsNullOrWhiteSpace(yaziciAdi)) return false;
-        if (!SanalYazicilariFiltrele) return true;
 
-        string kucuk = yaziciAdi.ToLowerInvariant();
-        return !SanalYaziciKelimeleri.Any(s => kucuk.Contains(s));
+        // 1. Sanal yazıcı kontrolü (PDF, Fax, OneNote)
+        if (SanalYazicilariFiltrele)
+        {
+            string kucuk = yaziciAdi.ToLowerInvariant();
+            if (SanalYaziciKelimeleri.Any(s => kucuk.Contains(s)))
+            {
+                return false;
+            }
+        }
+
+        // 2. Anlık Çevrimiçi/Fiziksel Bağlantı kontrolü (USB kablosu takılı mı?)
+        if (SadeceCevrimiciYazicilar)
+        {
+            if (!YaziciCevrimiciMi(yaziciAdi))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
+
+    #region WinSpool P/Invoke (Yazıcı Çevrimiçi/Takılı Durumu)
+
+    [DllImport("winspool.drv", CharSet = CharSet.Auto, SetLastError = true)]
+    private static extern bool OpenPrinter(string pPrinterName, out IntPtr phPrinter, IntPtr pDefault);
+
+    [DllImport("winspool.drv", SetLastError = true)]
+    private static extern bool ClosePrinter(IntPtr hPrinter);
+
+    [DllImport("winspool.drv", CharSet = CharSet.Auto, SetLastError = true)]
+    private static extern bool GetPrinter(IntPtr hPrinter, int Level, IntPtr pPrinter, int cbBuf, out int pcbNeeded);
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
+    private struct PRINTER_INFO_2
+    {
+        public string pServerName;
+        public string pPrinterName;
+        public string pShareName;
+        public string pPortName;
+        public string pDriverName;
+        public string pComment;
+        public string pLocation;
+        public IntPtr pDevMode;
+        public string pSepFile;
+        public string pPrintProcessor;
+        public string pDatatype;
+        public string pParameters;
+        public IntPtr pSecurityDescriptor;
+        public uint Attributes;
+        public uint Priority;
+        public uint DefaultPriority;
+        public uint StartTime;
+        public uint UntilTime;
+        public uint Status;
+        public uint cJobs;
+        public uint AveragePPM;
+    }
+
+    private const uint PRINTER_ATTRIBUTE_WORK_OFFLINE = 0x00000400;
+    private const uint PRINTER_STATUS_OFFLINE = 0x00000080;
+    private const uint PRINTER_STATUS_NOT_AVAILABLE = 0x00001000;
+
+    /// <summary>
+    /// Windows Print Spooler servisine doğrudan sorarak yazıcının fiziksel olarak takılı ve açık olup olmadığını kontrol eder.
+    /// USB fişi çekilmişse veya yazıcı kapalıysa FALSE döner.
+    /// </summary>
+    public bool YaziciCevrimiciMi(string yaziciAdi)
+    {
+        try
+        {
+            if (!OpenPrinter(yaziciAdi, out IntPtr hPrinter, IntPtr.Zero))
+            {
+                return false;
+            }
+
+            try
+            {
+                GetPrinter(hPrinter, 2, IntPtr.Zero, 0, out int bytesNeeded);
+                if (bytesNeeded <= 0) return true;
+
+                IntPtr pInfo = Marshal.AllocHGlobal(bytesNeeded);
+                try
+                {
+                    if (!GetPrinter(hPrinter, 2, pInfo, bytesNeeded, out _))
+                    {
+                        return true;
+                    }
+
+                    var info = Marshal.PtrToStructure<PRINTER_INFO_2>(pInfo);
+                    bool offline = (info.Attributes & PRINTER_ATTRIBUTE_WORK_OFFLINE) != 0 ||
+                                   (info.Status & PRINTER_STATUS_OFFLINE) != 0 ||
+                                   (info.Status & PRINTER_STATUS_NOT_AVAILABLE) != 0;
+
+                    return !offline;
+                }
+                finally
+                {
+                    Marshal.FreeHGlobal(pInfo);
+                }
+            }
+            finally
+            {
+                ClosePrinter(hPrinter);
+            }
+        }
+        catch
+        {
+            return true;
+        }
+    }
+
+    #endregion
 
     /// <summary>
     /// Sadece bu bilgisayara doğrudan bağlı olan yerel yazıcıları getirir.
