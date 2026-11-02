@@ -22,6 +22,9 @@ public class YaziciYoneticisi : IYaziciYoneticisi
     public bool SanalYazicilariFiltrele { get; set; } = true;
     public bool SadeceCevrimiciYazicilar { get; set; } = true;
 
+    public event Action? AnindaTaramaIstendi;
+    public void AgTaramasiTetikle() => AnindaTaramaIstendi?.Invoke();
+
     private static readonly string[] SanalYaziciKelimeleri = new[]
     {
         "pdf",

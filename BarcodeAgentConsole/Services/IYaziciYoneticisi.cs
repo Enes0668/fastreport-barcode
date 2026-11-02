@@ -41,4 +41,7 @@ public interface IYaziciYoneticisi
     bool ZamanAsiminaUgrayanAgYazicilariniTemizle(TimeSpan zamanAsimi);
     bool AjaninYazicilariniKaldir(string ajanAdi);
     bool AgYazicisiMi(string? yaziciAdi, out string ipAdresi, out int port, out string gercekYaziciAdi);
+
+    event Action? AnindaTaramaIstendi;
+    void AgTaramasiTetikle();
 }

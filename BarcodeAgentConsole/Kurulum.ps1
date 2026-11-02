@@ -17,12 +17,12 @@ try {
 }
 Write-Host ""
 
-# 2. Port 5055 Kuralı
-Write-Host "[2/4] TCP Port 5055 güvenlik duvarı kuralı ekleniyor..." -ForegroundColor Yellow
+# 2. Port 5055-5064 Kuralı (Yedek portlar dahil)
+Write-Host "[2/4] TCP Port 5055-5064 güvenlik duvarı kuralı ekleniyor..." -ForegroundColor Yellow
 try {
     netsh advfirewall firewall delete rule name="Barkod Ajan (TCP 5055)" | Out-Null
-    netsh advfirewall firewall add rule name="Barkod Ajan (TCP 5055)" dir=in action=allow protocol=TCP localport=5055 profile=any enable=yes | Out-Null
-    Write-Host "   [OK] Port 5055 içeri gelen istekler için açıldı." -ForegroundColor Green
+    netsh advfirewall firewall add rule name="Barkod Ajan (TCP 5055)" dir=in action=allow protocol=TCP localport=5055-5064 profile=any enable=yes | Out-Null
+    Write-Host "   [OK] Port 5055-5064 içeri gelen istekler için açıldı." -ForegroundColor Green
 } catch {
     Write-Host "   [HATA] Port kuralı eklenemedi: $_" -ForegroundColor Red
 }

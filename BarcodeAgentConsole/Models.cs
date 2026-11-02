@@ -57,6 +57,13 @@ public class AgBaskiIstekPaketi
 
     /// <summary>
     /// Eğer "SablonTalep" ise karşı bilgisayar .frx dosyasının içeriğini döndürür.
+    /// Eğer "YazicilariVer" ise çift yönlü yazıcı ve şablon el sıkışması yapar.
     /// </summary>
     public string IslemTuru { get; set; } = "Baski";
+
+    /// <summary>
+    /// Çift yönlü anında keşif: İsteği gönderen bilgisayar kendi yazıcı listesini de pakete ekler,
+    /// böylece karşı bilgisayar da 10 saniye beklemeden göndereni aynı anda listesine ekler.
+    /// </summary>
+    public AjanPaylasimPaketi? GonderenPaket { get; set; }
 }

@@ -33,7 +33,7 @@ public class YerelBarkodHub : Hub
     {
         _logger.LogInformation("🌐 [YEREL HUB] Web tarayıcısı / HBYS istemcisi bağlandı (ConnectionId: {Id})", Context.ConnectionId);
 
-        // Bağlanan web ekranına anında bu bilgisayardaki + ağdan (UDP) gelen tüm yazıcıları ve simülasyon durumunu gönder
+        // Bağlanan web ekranına anında bu bilgisayardaki + ağdan (TCP) gelen tüm yazıcıları gönder ve hızlı tarama tetikle
         var yazicilar = _yaziciYoneticisi.YukluYazicilariGetir();
         await Clients.Caller.SendAsync("YazicilarAlindi", new
         {
@@ -43,6 +43,8 @@ public class YerelBarkodHub : Hub
             agPaylasimAcik = _yaziciYoneticisi.AgPaylasimAcik,
             zaman = DateTime.Now.ToString("HH:mm:ss")
         });
+
+        _yaziciYoneticisi.AgTaramasiTetikle();
 
         await base.OnConnectedAsync();
     }
@@ -92,6 +94,7 @@ public class YerelBarkodHub : Hub
     /// </summary>
     public async Task YazicilariGetir()
     {
+        _yaziciYoneticisi.AgTaramasiTetikle();
         var yazicilar = _yaziciYoneticisi.YukluYazicilariGetir();
         await Clients.All.SendAsync("YazicilarAlindi", new
         {
