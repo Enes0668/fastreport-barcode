@@ -308,17 +308,19 @@ public class BarkodYaziciServisi : IYaziciServisi
 
     private static string SablonYolunuBelirle(string? ozelSablonYolu)
     {
+        string anaDizin = Path.GetDirectoryName(Environment.ProcessPath) ?? AppContext.BaseDirectory;
+
         if (!string.IsNullOrWhiteSpace(ozelSablonYolu))
         {
             string tamYol = Path.IsPathRooted(ozelSablonYolu)
                 ? ozelSablonYolu
-                : Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, ozelSablonYolu));
+                : Path.GetFullPath(Path.Combine(anaDizin, ozelSablonYolu));
 
             if (File.Exists(tamYol))
                 return tamYol;
         }
 
-        string yerelSablon = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "etiket_sablonu.frx");
+        string yerelSablon = Path.Combine(anaDizin, "etiket_sablonu.frx");
         return yerelSablon;
     }
 }

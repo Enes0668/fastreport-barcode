@@ -1,4 +1,6 @@
 using System;
+using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -6,15 +8,41 @@ using BarcodeAgentConsole;
 using BarcodeAgentConsole.Hubs;
 using BarcodeAgentConsole.Services;
 using BarcodeAgentConsole.Workers;
+using FastReport;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
 
 Console.OutputEncoding = Encoding.UTF8;
-Console.Title = "FastReport Barkod Baskı Ajanı (Gömülü SignalR Hub + LAN Paylaşım)";
 
-var builder = WebApplication.CreateBuilder(args);
+// 0. Yönetici alt süreci olarak "--kurulum-yap" ile çağrıldıysa güvenlik duvarı kurallarını uygula ve çık:
+if (AgGuvenlikKurulumu.KurulumAltSureciMiVeCalistir(args))
+    return;
+
+string exeDizini = Path.GetDirectoryName(Environment.ProcessPath) ?? AppContext.BaseDirectory;
+Directory.SetCurrentDirectory(exeDizini);
+
+// Hızlı doğrulama modu (Kağıt harcamadan Single-File FastReport motorunu doğrular):
+if (args.Any(a => string.Equals(a, "--rapor-test", StringComparison.OrdinalIgnoreCase)))
+{
+    using var testReport = new Report();
+    string testSablon = Path.Combine(exeDizini, "etiket_sablonu.frx");
+    testReport.Load(testSablon);
+    testReport.SetParameterValue("BarkodNo", "TEST-504");
+    testReport.SetParameterValue("HastaAdi", "Test Hasta");
+    testReport.Prepare();
+    Console.WriteLine("RAPOR_TEST_BASARILI");
+    return;
+}
+
+Console.Title = "FastReport Barkod Baskı Ajanı (Tek Dosya + Otomatik Kurulum)";
+
+var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+{
+    Args = args,
+    ContentRootPath = exeDizini
+});
 
 // 1. Gömülü SignalR ve CORS Servislerini Kaydet (2. YÖNTEM: Merkezi Sunucu Yok, Hub Agent'ın İçinde!)
 builder.Services.AddSignalR();
@@ -89,11 +117,14 @@ app.MapGet("/", () => Results.Content(YerelDashboardHtml.Content, "text/html; ch
 
 Console.ForegroundColor = ConsoleColor.Cyan;
 Console.WriteLine("=========================================================================");
-Console.WriteLine("   🏥 FASTREPORT BARKOD BASKI AJANI (GÖMÜLÜ SIGNALR + AĞ PAYLAŞIMI)     ");
+Console.WriteLine("   🏥 FASTREPORT BARKOD BASKI AJANI (TEK DOSYA + OTOMATİK KURULUM)      ");
 Console.WriteLine($"   📡 Gömülü SignalR Hub : http://localhost:{aktifHubPort}/barkodHub");
 Console.WriteLine($"   🌐 HBYS Test Ekranı   : http://localhost:{aktifHubPort}");
 Console.WriteLine("=========================================================================");
 Console.ResetColor();
+
+// İlk kez çalıştırılıyorsa (veya yeni klasöre taşındıysa) 1 defaya mahsus otomatik Güvenlik Duvarı & Özel Ağ kurulumunu yap:
+AgGuvenlikKurulumu.GerekliyseOtomatikKurulumYap(args);
 
 await app.RunAsync();
 
