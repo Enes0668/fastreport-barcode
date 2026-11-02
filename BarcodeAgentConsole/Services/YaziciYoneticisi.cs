@@ -6,6 +6,8 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Microsoft.Win32;
+using Microsoft.Win32.SafeHandles;
 
 namespace BarcodeAgentConsole.Services;
 
@@ -78,7 +80,7 @@ public class YaziciYoneticisi : IYaziciYoneticisi
         return true;
     }
 
-    #region WinSpool P/Invoke (Yazıcı Çevrimiçi/Takılı Durumu)
+    #region WinSpool + SetupAPI P/Invoke (Anlık Fiziksel USB & Çevrimiçi Kontrolü)
 
     [DllImport("winspool.drv", CharSet = CharSet.Auto, SetLastError = true)]
     private static extern bool OpenPrinter(string pPrinterName, out IntPtr phPrinter, IntPtr pDefault);
@@ -88,6 +90,35 @@ public class YaziciYoneticisi : IYaziciYoneticisi
 
     [DllImport("winspool.drv", CharSet = CharSet.Auto, SetLastError = true)]
     private static extern bool GetPrinter(IntPtr hPrinter, int Level, IntPtr pPrinter, int cbBuf, out int pcbNeeded);
+
+    private static readonly Guid GUID_DEVINTERFACE_USBPRINT = new("28d78fad-5a12-11d1-ae5b-0000f803a8c2");
+    private const uint DIGCF_PRESENT = 0x02;
+    private const uint DIGCF_DEVICEINTERFACE = 0x10;
+    private const int KEY_READ = 0x20019;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct SP_DEVICE_INTERFACE_DATA
+    {
+        public int cbSize;
+        public Guid InterfaceClassGuid;
+        public int Flags;
+        public IntPtr Reserved;
+    }
+
+    [DllImport("setupapi.dll", CharSet = CharSet.Auto, SetLastError = true)]
+    private static extern IntPtr SetupDiGetClassDevs(ref Guid ClassGuid, IntPtr Enumerator, IntPtr hwndParent, uint Flags);
+
+    [DllImport("setupapi.dll", CharSet = CharSet.Auto, SetLastError = true)]
+    private static extern bool SetupDiEnumDeviceInterfaces(IntPtr hDevInfo, IntPtr devInfo, ref Guid interfaceClassGuid, uint memberIndex, ref SP_DEVICE_INTERFACE_DATA deviceInterfaceData);
+
+    [DllImport("setupapi.dll", SetLastError = true)]
+    private static extern IntPtr SetupDiOpenDeviceInterfaceRegKey(IntPtr deviceInfoSet, ref SP_DEVICE_INTERFACE_DATA deviceInterfaceData, uint reserved, int samDesired);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern int RegCloseKey(IntPtr hKey);
+
+    [DllImport("setupapi.dll", SetLastError = true)]
+    private static extern bool SetupDiDestroyDeviceInfoList(IntPtr DeviceInfoSet);
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
     private struct PRINTER_INFO_2
@@ -120,8 +151,86 @@ public class YaziciYoneticisi : IYaziciYoneticisi
     private const uint PRINTER_STATUS_NOT_AVAILABLE = 0x00001000;
 
     /// <summary>
-    /// Windows Print Spooler servisine doğrudan sorarak yazıcının fiziksel olarak takılı ve açık olup olmadığını kontrol eder.
-    /// USB fişi çekilmişse veya yazıcı kapalıysa FALSE döner.
+    /// Windows USB çekirdek sürücüsüne (usbprint.sys) doğrudan sorarak ŞU SANİYE fiziksel olarak
+    /// kablosu takılı ve açık olan USB yazıcı portlarını (örn: USB001) 0.5 milisaniyede döndürür.
+    /// Windows Print Spooler'ın 5-15 saniyelik gecikmesini tamamen ortadan kaldırır!
+    /// </summary>
+    private static HashSet<string> AktifFizikselUsbPortlariniGetir(out bool sorguBasarili)
+    {
+        var aktifPortlar = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        sorguBasarili = false;
+
+        try
+        {
+            Guid guid = GUID_DEVINTERFACE_USBPRINT;
+            IntPtr hDevInfo = SetupDiGetClassDevs(ref guid, IntPtr.Zero, IntPtr.Zero, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
+            if (hDevInfo == IntPtr.Zero || hDevInfo == new IntPtr(-1))
+                return aktifPortlar;
+
+            sorguBasarili = true;
+            try
+            {
+                uint idx = 0;
+                while (true)
+                {
+                    var did = new SP_DEVICE_INTERFACE_DATA { cbSize = Marshal.SizeOf<SP_DEVICE_INTERFACE_DATA>() };
+                    if (!SetupDiEnumDeviceInterfaces(hDevInfo, IntPtr.Zero, ref guid, idx, ref did))
+                        break;
+
+                    IntPtr hKey = SetupDiOpenDeviceInterfaceRegKey(hDevInfo, ref did, 0, KEY_READ);
+                    if (hKey != IntPtr.Zero && hKey != new IntPtr(-1))
+                    {
+                        try
+                        {
+                            using var regKey = RegistryKey.FromHandle(new SafeRegistryHandle(hKey, ownsHandle: false));
+                            string baseName = regKey.GetValue("Base Name")?.ToString() ?? "USB";
+                            if (regKey.GetValue("Port Number") is int portNum)
+                            {
+                                aktifPortlar.Add($"{baseName}{portNum:D3}");
+                            }
+                        }
+                        finally
+                        {
+                            RegCloseKey(hKey);
+                        }
+                    }
+
+                    idx++;
+                }
+            }
+            finally
+            {
+                SetupDiDestroyDeviceInfoList(hDevInfo);
+            }
+        }
+        catch
+        {
+            sorguBasarili = false;
+        }
+
+        return aktifPortlar;
+    }
+
+    private static bool UsbYaziciPortuMu(string portAdi)
+    {
+        if (string.IsNullOrWhiteSpace(portAdi) || portAdi.Length < 4)
+            return false;
+
+        if (!portAdi.StartsWith("USB", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        for (int i = 3; i < portAdi.Length; i++)
+        {
+            if (!char.IsDigit(portAdi[i]))
+                return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Hem Windows Print Spooler durumunu hem de doğrudan fiziksel USB portunu (USB001 vb.) kontrol eder.
+    /// USB kablosu çekildiği milisaniyede Spooler'ın uyanmasını beklemeden anında FALSE döner!
     /// </summary>
     public bool YaziciCevrimiciMi(string yaziciAdi)
     {
@@ -150,7 +259,28 @@ public class YaziciYoneticisi : IYaziciYoneticisi
                                    (info.Status & PRINTER_STATUS_OFFLINE) != 0 ||
                                    (info.Status & PRINTER_STATUS_NOT_AVAILABLE) != 0;
 
-                    return !offline;
+                    if (offline)
+                        return false;
+
+                    // Yazıcı USB portuna (örn: USB001) bağlıysa, doğrudan fiziksel USB donanım varlığını kontrol et!
+                    if (!string.IsNullOrWhiteSpace(info.pPortName))
+                    {
+                        var usbPortlar = info.pPortName
+                            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                            .Where(UsbYaziciPortuMu)
+                            .ToList();
+
+                        if (usbPortlar.Count > 0)
+                        {
+                            var canliUsbPortlar = AktifFizikselUsbPortlariniGetir(out bool usbSorguBasarili);
+                            if (usbSorguBasarili && !usbPortlar.Any(p => canliUsbPortlar.Contains(p)))
+                            {
+                                return false;
+                            }
+                        }
+                    }
+
+                    return true;
                 }
                 finally
                 {
@@ -331,7 +461,7 @@ public class YaziciYoneticisi : IYaziciYoneticisi
             return _agYazicilari.Keys.FirstOrDefault() ?? string.Empty;
         }
 
-        if (!string.IsNullOrWhiteSpace(configYazici))
+        if (!string.IsNullOrWhiteSpace(configYazici) && GecerliYaziciMi(configYazici))
         {
             _logger.LogInformation("Konfigürasyondan belirlenen yazıcı kullanılıyor: '{Yazici}'", configYazici);
             return configYazici;

@@ -216,7 +216,7 @@ public class BarkodAjanWorker : BackgroundService
 
                     if (_yaziciYoneticisi.AgYazicilariniGuncelle(istek.GonderenPaket))
                     {
-                        _logger.LogInformation("⚡ [ANINDA EŞLEŞME] {Ajan} ({Ip}:{Port}) bağlandı -> {Sayi} yazıcı anında eklendi!",
+                        _logger.LogInformation("⚡ [ANINDA GÜNCELLEME] {Ajan} ({Ip}:{Port}) -> Aktif paylaşılan yazıcı: {Sayi} adet",
                             istek.GonderenPaket.AjanAdi, istek.GonderenPaket.IpAdresi, istek.GonderenPaket.TcpPort, istek.GonderenPaket.Yazicilar.Count);
                         _ = YazicilariWebEBildirAsync();
                     }
@@ -247,7 +247,7 @@ public class BarkodAjanWorker : BackgroundService
             {
                 IstekId = istek.IstekId,
                 Basarili = sonuc.Basarili,
-                Mesaj = $"{_ajanAdi} üzerinden basıldı: {sonuc.Mesaj}",
+                Mesaj = sonuc.Basarili ? $"{_ajanAdi} üzerinden basıldı: {sonuc.Mesaj}" : $"{_ajanAdi}: {sonuc.Mesaj}",
                 Yazici = istek.HedefYazici,
                 Tarih = DateTime.Now
             };
@@ -257,8 +257,8 @@ public class BarkodAjanWorker : BackgroundService
     }
 
     /// <summary>
-    /// Her 1.5 saniyede bir yerel USB portlarını yoklar. Yazıcı takıldığı veya çıkarıldığı saniye
-    /// hem kendi Web arayüzünü hem de ağdaki bilinen diğer bilgisayarları ANINDA günceller!
+    /// Her 0.8 saniyede bir yerel fiziksel USB portlarını yoklar. Yazıcı takıldığı veya çıkarıldığı saniye
+    /// (Windows Spooler'ın 5-15sn gecikmesini beklemeden) hem kendi Web arayüzünü hem de ağdaki diğer bilgisayarları ANINDA günceller!
     /// </summary>
     private async Task HizliDonanimTakipDongusuAsync(CancellationToken stoppingToken)
     {
@@ -266,7 +266,7 @@ public class BarkodAjanWorker : BackgroundService
         {
             try
             {
-                await Task.Delay(1500, stoppingToken);
+                await Task.Delay(800, stoppingToken);
 
                 var guncelYerel = _yaziciYoneticisi.YerelYazicilariGetir();
                 if (!_oncekiYerelYazicilar.SequenceEqual(guncelYerel))
@@ -275,12 +275,18 @@ public class BarkodAjanWorker : BackgroundService
                     _logger.LogInformation("🔌 [DONANIM GÜNCELLEMESİ] Yerel yazıcı takıldı veya çıkarıldı. Anlık aktif: {Sayi} adet.", guncelYerel.Count);
                     await YazicilariWebEBildirAsync();
 
-                    // Bilinen tüm ajanlara değişikliği milisaniyeler içinde bildir!
-                    if (!_bilinenAjanlar.IsEmpty)
+                    // Bilinen tüm ağ ajanlarına ve yerel test portlarına değişikliği milisaniyeler içinde bildir!
+                    using var sem = new SemaphoreSlim(20);
+                    var hedefler = _bilinenAjanlar.ToArray()
+                        .Select(kvp => (Ip: kvp.Key, Port: kvp.Value))
+                        .Concat(Enumerable.Range(_baslangicTcpPort, 3)
+                            .Where(p => p != _aktifTcpPort)
+                            .Select(p => (Ip: "127.0.0.1", Port: p)))
+                        .ToList();
+
+                    if (hedefler.Count > 0)
                     {
-                        using var sem = new SemaphoreSlim(20);
-                        var bildirimler = _bilinenAjanlar.ToArray()
-                            .Select(kvp => TekilIpTcpTaraAsync(kvp.Key, kvp.Value, sem, stoppingToken));
+                        var bildirimler = hedefler.Select(h => TekilIpTcpTaraAsync(h.Ip, h.Port, sem, stoppingToken));
                         await Task.WhenAll(bildirimler);
                     }
                 }

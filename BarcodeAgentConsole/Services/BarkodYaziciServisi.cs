@@ -118,12 +118,44 @@ public class BarkodYaziciServisi : IYaziciServisi
             return (false, msg);
         }
 
-        string hedefYazici = !string.IsNullOrWhiteSpace(ozelYazici) ? ozelYazici : VarsayilanYazici;
+        string hedefYazici = !string.IsNullOrWhiteSpace(ozelYazici)
+            ? ozelYazici
+            : _yaziciYoneticisi.VarsayilanYaziciyiGetir(_config["Printer:Name"]);
+
+        if (string.IsNullOrWhiteSpace(hedefYazici))
+        {
+            string msg = "Takılı ve çevrimiçi bir fiziksel yazıcı bulunamadı! Lütfen yazıcı bağlantısını veya yazıcı seçimini kontrol edin.";
+            _logger.LogWarning("{Mesaj}", msg);
+            return (false, msg);
+        }
 
         // 2. KADEME KONTROLÜ: Seçilen yazıcı ağdaki diğer bilgisayara (örn. PC-A) mı ait?
         if (_yaziciYoneticisi.AgYazicisiMi(hedefYazici, out string hedefIp, out int hedefPort, out string gercekYaziciAdi))
         {
-            return AgdakiBilgisayaraBaskiGonder(istekId, hedefIp, hedefPort, gercekYaziciAdi, parametreler);
+            var agSonuc = AgdakiBilgisayaraBaskiGonder(istekId, hedefIp, hedefPort, gercekYaziciAdi, parametreler);
+            if (!agSonuc.Basarili)
+            {
+                // Karşı yazıcı çıkarılmışsa listeyi de anında yenilemesi için taramayı tetikle
+                _yaziciYoneticisi.AgTaramasiTetikle();
+            }
+            return agSonuc;
+        }
+
+        // Ağ yazıcısı formatında ("[PC-A | ...]") olduğu halde artık aktif ağ listesinde yoksa (USB sökülmüş / PC kapanmışsa) anında reddet!
+        if (hedefYazici.StartsWith('['))
+        {
+            string msg = $"Seçilen ağ yazıcısı ({hedefYazici}) artık takılı değil veya çevrimdışı! Baskı iptal edildi.";
+            _logger.LogWarning("{Mesaj}", msg);
+            return (false, msg);
+        }
+
+        // CANLI FİZİKSEL BAĞLANTI KONTROLÜ:
+        // USB kablosu 1 milisaniye önce çekilmiş olsa bile Windows sahte kuyruğuna (Bekleyen İşler) atmasını ENGELLE!
+        if (!_yaziciYoneticisi.GecerliYaziciMi(hedefYazici))
+        {
+            string msg = $"'{hedefYazici}' yazıcısının USB kablosu çıkarılmış veya yazıcı çevrimdışı! Baskı kuyruğa alınmadan iptal edildi.";
+            _logger.LogWarning("❌ [BASKI ENGELLENDİ] {Mesaj}", msg);
+            return (false, msg);
         }
 
         try
