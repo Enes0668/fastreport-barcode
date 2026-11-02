@@ -30,6 +30,7 @@ public interface IYaziciYoneticisi
     /// Fişi çekilen yazıcılar otomatik olarak gizlenir.
     /// </summary>
     bool SadeceCevrimiciYazicilar { get; set; }
+    bool IlkAgTaramasiTamamlandi { get; set; }
 
     bool GecerliYaziciMi(string yaziciAdi);
     bool YaziciCevrimiciMi(string yaziciAdi);

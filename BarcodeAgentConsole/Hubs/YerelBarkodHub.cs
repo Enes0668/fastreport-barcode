@@ -41,6 +41,7 @@ public class YerelBarkodHub : Hub
             yazicilar = yazicilar,
             yerelYaziciYokModu = _yaziciYoneticisi.YerelYaziciYokSimulasyonu,
             agPaylasimAcik = _yaziciYoneticisi.AgPaylasimAcik,
+            ilkTaramaTamamlandi = _yaziciYoneticisi.IlkAgTaramasiTamamlandi,
             zaman = DateTime.Now.ToString("HH:mm:ss")
         });
 
@@ -102,6 +103,7 @@ public class YerelBarkodHub : Hub
             yazicilar = yazicilar,
             yerelYaziciYokModu = _yaziciYoneticisi.YerelYaziciYokSimulasyonu,
             agPaylasimAcik = _yaziciYoneticisi.AgPaylasimAcik,
+            ilkTaramaTamamlandi = _yaziciYoneticisi.IlkAgTaramasiTamamlandi,
             zaman = DateTime.Now.ToString("HH:mm:ss")
         });
     }

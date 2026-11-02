@@ -286,7 +286,7 @@ public class BarkodAjanWorker : BackgroundService
 
                     if (hedefler.Count > 0)
                     {
-                        var bildirimler = hedefler.Select(h => TekilIpTcpTaraAsync(h.Ip, h.Port, sem, stoppingToken));
+                        var bildirimler = hedefler.Select(h => TekilIpTcpTaraAsync(h.Ip, h.Port, sem, stoppingToken, baglantiZamanAsimiMs: 1800));
                         await Task.WhenAll(bildirimler);
                     }
                 }
@@ -303,9 +303,9 @@ public class BarkodAjanWorker : BackgroundService
     }
 
     /// <summary>
-    /// 2 AŞAMALI YILDIRIM HIZINDA TCP AĞ TARAMASI:
-    /// 1. Aşama (20-50ms): Önce Windows ARP tablosundaki aktif cihazları ve bilinen ajanları tarar -> Yazıcılar ANINDA düşer!
-    /// 2. Aşama (~1 sn): Geri kalan IP'leri 35'erli kontrollü paketlerle (Windows bağlantı kuyruğunu tıkamadan) tarar.
+    /// 2 AŞAMALI YILDIRIM HIZINDA VE WI-FI TOLERANSLI TCP AĞ TARAMASI:
+    /// 1. Aşama: Bilinen ajanları (2000ms Wi-Fi uyku toleransıyla) ve ARP tablosundaki aktif cihazları (650ms ile) tarar.
+    /// 2. Aşama: Geri kalan soğuk IP'leri 35'erli kontrollü paketlerle (260ms ile) hızla tarar.
     /// </summary>
     private async Task PeriyodikTcpAgTaramaDongusuAsync(CancellationToken stoppingToken)
     {
@@ -329,7 +329,7 @@ public class BarkodAjanWorker : BackgroundService
                 // Aynı bilgisayarda test amaçlı açılmış 2. / 3. konsol pencereleri varsa (5055, 5056, 5057) anında kontrol et
                 var yerelPortGorevleri = Enumerable.Range(_baslangicTcpPort, 3)
                     .Where(p => p != _aktifTcpPort)
-                    .Select(p => TekilIpTcpTaraAsync("127.0.0.1", p, semaphore, stoppingToken));
+                    .Select(p => TekilIpTcpTaraAsync("127.0.0.1", p, semaphore, stoppingToken, baglantiZamanAsimiMs: 300));
                 await Task.WhenAll(yerelPortGorevleri);
 
                 // Fiziksel yerel ağ alt ağlarını tara (VirtualBox 192.168.56.1 gibi sanal ağlar elenmiştir)
@@ -344,39 +344,57 @@ public class BarkodAjanWorker : BackgroundService
                         _logger.LogInformation("⚡ [HIZLI AĞ KEŞFİ] Gerçek ağ ({OnEk}1-254) taranıyor...", ipOnEk);
                     }
 
-                    // AŞAMA 1: Bilinen Ajanlar + Windows ARP Önbelleğindeki Aktif Cihazlar (20-50 milisaniyede sonuç verir!)
-                    var oncelikliIpler = new HashSet<string>(StringComparer.Ordinal);
-                    foreach (var bilinenIp in _bilinenAjanlar.Keys)
+                    // AŞAMA 1A: Daha önce keşfedilmiş bilinen ajanlar (Wi-Fi uyku/gecikmelerinde asla düşmemesi için 2000ms geniş tolerans!)
+                    var tarananOncelikliIpler = new HashSet<string>(StringComparer.Ordinal);
+                    var bilinenGorevler = new List<Task>();
+
+                    foreach (var kvp in _bilinenAjanlar.ToArray())
                     {
-                        if (bilinenIp.StartsWith(ipOnEk, StringComparison.Ordinal) && bilinenIp != yerelIp)
-                            oncelikliIpler.Add(bilinenIp);
+                        if (kvp.Key.StartsWith(ipOnEk, StringComparison.Ordinal) && kvp.Key != yerelIp)
+                        {
+                            tarananOncelikliIpler.Add(kvp.Key);
+                            bilinenGorevler.Add(TekilIpTcpTaraAsync(kvp.Key, kvp.Value, semaphore, stoppingToken, baglantiZamanAsimiMs: 2000));
+                        }
                     }
+
+                    if (bilinenGorevler.Count > 0)
+                    {
+                        await Task.WhenAll(bilinenGorevler);
+                    }
+
+                    // AŞAMA 1B: Windows ARP Önbelleğindeki Aktif Cihazlar (650ms tolerans ile ilk dalgada anında yakalar)
+                    var arpGorevleri = new List<Task>();
                     foreach (var arpIp in ArpTablosundakiIpleriGetir(ipOnEk))
                     {
-                        if (arpIp != yerelIp)
-                            oncelikliIpler.Add(arpIp);
+                        if (arpIp != yerelIp && tarananOncelikliIpler.Add(arpIp))
+                        {
+                            arpGorevleri.Add(TekilIpTcpTaraAsync(arpIp, _baslangicTcpPort, semaphore, stoppingToken, baglantiZamanAsimiMs: 650));
+                        }
                     }
 
-                    if (oncelikliIpler.Count > 0)
+                    if (arpGorevleri.Count > 0)
                     {
-                        var oncelikliGorevler = oncelikliIpler
-                            .Select(ip => TekilIpTcpTaraAsync(ip, _baslangicTcpPort, semaphore, stoppingToken));
-                        await Task.WhenAll(oncelikliGorevler);
+                        await Task.WhenAll(arpGorevleri);
                     }
 
-                    // AŞAMA 2: Kalan IP adreslerini Windows yarı-açık bağlantı kuyruğunu boğmadan (35'erli gruplarla) hızla tara
+                    // AŞAMA 2: Kalan soğuk IP adreslerini Windows yarı-açık bağlantı kuyruğunu boğmadan (35'erli gruplarla) hızla tara
                     var kalanGorevler = Enumerable.Range(1, 254)
                         .Select(i => $"{ipOnEk}{i}")
-                        .Where(ip => ip != yerelIp && !oncelikliIpler.Contains(ip))
-                        .Select(hedefIp => TekilIpTcpTaraAsync(hedefIp, _baslangicTcpPort, semaphore, stoppingToken));
+                        .Where(ip => ip != yerelIp && !tarananOncelikliIpler.Contains(ip))
+                        .Select(hedefIp => TekilIpTcpTaraAsync(hedefIp, _baslangicTcpPort, semaphore, stoppingToken, baglantiZamanAsimiMs: 260));
 
                     await Task.WhenAll(kalanGorevler);
                 }
 
-                ilkTarama = false;
+                if (ilkTarama)
+                {
+                    ilkTarama = false;
+                    _yaziciYoneticisi.IlkAgTaramasiTamamlandi = true;
+                    await YazicilariWebEBildirAsync();
+                }
 
-                // Kapanan bilgisayarların yazıcılarını temizle (30 saniye boyunca cevap vermeyenler)
-                if (_yaziciYoneticisi.ZamanAsiminaUgrayanAgYazicilariniTemizle(TimeSpan.FromSeconds(30)))
+                // Gerçekten kapanan bilgisayarların yazıcılarını temizle (45 saniye / 9 ardışık 2sn kontrol boyunca cevap vermeyenler)
+                if (_yaziciYoneticisi.ZamanAsiminaUgrayanAgYazicilariniTemizle(TimeSpan.FromSeconds(45)))
                 {
                     await YazicilariWebEBildirAsync();
                 }
@@ -402,7 +420,7 @@ public class BarkodAjanWorker : BackgroundService
         }
     }
 
-    private async Task TekilIpTcpTaraAsync(string hedefIp, int hedefPort, SemaphoreSlim semaphore, CancellationToken stoppingToken)
+    private async Task TekilIpTcpTaraAsync(string hedefIp, int hedefPort, SemaphoreSlim semaphore, CancellationToken stoppingToken, int baglantiZamanAsimiMs = 260)
     {
         await semaphore.WaitAsync(stoppingToken);
         try
@@ -411,9 +429,9 @@ public class BarkodAjanWorker : BackgroundService
                 return;
 
             using var tcpClient = new TcpClient();
-            // ÖNEMLİ: 260ms zamanlayıcı tüm 254 IP için aynı anda değil, SADECE sıra bu IP'ye geldiğinde başlar!
+            // ÖNEMLİ: Zamanlayıcı tüm 254 IP için aynı anda değil, SADECE sıra bu IP'ye geldiğinde başlar!
             using var connectCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
-            connectCts.CancelAfter(260);
+            connectCts.CancelAfter(baglantiZamanAsimiMs);
 
             await tcpClient.ConnectAsync(ipAddr, hedefPort, connectCts.Token);
 
@@ -747,6 +765,7 @@ public class BarkodAjanWorker : BackgroundService
                 yazicilar = yazicilar,
                 yerelYaziciYokModu = _yaziciYoneticisi.YerelYaziciYokSimulasyonu,
                 agPaylasimAcik = _yaziciYoneticisi.AgPaylasimAcik,
+                ilkTaramaTamamlandi = _yaziciYoneticisi.IlkAgTaramasiTamamlandi,
                 zaman = DateTime.Now.ToString("HH:mm:ss")
             });
         }

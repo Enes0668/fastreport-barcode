@@ -23,6 +23,7 @@ public class YaziciYoneticisi : IYaziciYoneticisi
     public bool AgPaylasimAcik { get; set; } = true;
     public bool SanalYazicilariFiltrele { get; set; } = true;
     public bool SadeceCevrimiciYazicilar { get; set; } = true;
+    public bool IlkAgTaramasiTamamlandi { get; set; } = false;
 
     public event Action? AnindaTaramaIstendi;
     public void AgTaramasiTetikle() => AnindaTaramaIstendi?.Invoke();

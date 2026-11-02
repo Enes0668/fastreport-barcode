@@ -72,11 +72,13 @@ app.MapPost("/api/yazdir", async (IHubContext<YerelBarkodHub> hubContext, IYazic
 
 app.MapGet("/api/yazicilari-yenile", async (IHubContext<YerelBarkodHub> hubContext, IYaziciYoneticisi yaziciYoneticisi) =>
 {
+    yaziciYoneticisi.AgTaramasiTetikle();
     var yazicilar = yaziciYoneticisi.YukluYazicilariGetir();
     await hubContext.Clients.All.SendAsync("YazicilarAlindi", new
     {
         connectionId = "YerelAjan",
         yazicilar = yazicilar,
+        ilkTaramaTamamlandi = yaziciYoneticisi.IlkAgTaramasiTamamlandi,
         zaman = DateTime.Now.ToString("HH:mm:ss")
     });
     return Results.Ok(new { basarili = true, mesaj = "Yazıcı listesi güncellendi." });
@@ -252,7 +254,6 @@ public static class YerelDashboardHtml
             .build();
 
         connection.on("YazicilarAlindi", (data) => {
-            log(`🎉 Agent'tan ${data.yazicilar.length} adet fiziksel yazıcı alındı (Sanal yazıcılar filtrelendi).`, "success");
             document.getElementById("statusBadge").className = "status-badge status-online";
             document.getElementById("statusText").innerText = "Gömülü Agent Aktif 🟢";
 
@@ -264,9 +265,17 @@ public static class YerelDashboardHtml
             listDiv.innerHTML = "";
 
             if (data.yazicilar.length === 0) {
-                listDiv.innerHTML = '<div style="padding:12px; background:#0b1329; border:1px dashed #ef4444; border-radius:8px; color:#f87171; font-size:13px;">⚠️ Kullanılabilir fiziksel barkod yazıcısı bulunamadı (PDF/Fax gibi sanal yazıcılar filtrelenmiştir)!</div>';
+                if (data.ilkTaramaTamamlandi === false) {
+                    log("🔄 Ağdaki diğer bilgisayarlar ve yazıcılar taranıyor...", "info");
+                    listDiv.innerHTML = '<div style="padding:12px; background:#0b1329; border:1px dashed #38bdf8; border-radius:8px; color:#38bdf8; font-size:13px;">🔄 Ağdaki bilgisayarlar ve paylaşımlı yazıcılar taranıyor, lütfen bekleyin...</div>';
+                } else {
+                    log("⚠️ Aktif fiziksel yazıcı bulunamadı.", "warn");
+                    listDiv.innerHTML = '<div style="padding:12px; background:#0b1329; border:1px dashed #ef4444; border-radius:8px; color:#f87171; font-size:13px;">⚠️ Kullanılabilir fiziksel barkod yazıcısı bulunamadı (PDF/Fax gibi sanal yazıcılar filtrelenmiştir)!</div>';
+                }
                 return;
             }
+
+            log(`🎉 Agent'tan ${data.yazicilar.length} adet fiziksel yazıcı alındı (Sanal yazıcılar filtrelendi).`, "success");
 
             const yerelYazicilar = data.yazicilar.filter(p => !p.startsWith("["));
             const agYazicilari = data.yazicilar.filter(p => p.startsWith("["));
