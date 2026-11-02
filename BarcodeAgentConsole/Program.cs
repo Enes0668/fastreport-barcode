@@ -252,7 +252,7 @@ public static class YerelDashboardHtml
             .build();
 
         connection.on("YazicilarAlindi", (data) => {
-            log(`🎉 Agent'tan ${data.yazicilar.length} adet yazıcı alındı (Yerel + TCP Paylaşımlı).`, "success");
+            log(`🎉 Agent'tan ${data.yazicilar.length} adet fiziksel yazıcı alındı (Sanal yazıcılar filtrelendi).`, "success");
             document.getElementById("statusBadge").className = "status-badge status-online";
             document.getElementById("statusText").innerText = "Gömülü Agent Aktif 🟢";
 
@@ -264,23 +264,58 @@ public static class YerelDashboardHtml
             listDiv.innerHTML = "";
 
             if (data.yazicilar.length === 0) {
-                listDiv.innerHTML = '<div style="padding:12px; background:#0b1329; border:1px dashed #ef4444; border-radius:8px; color:#f87171; font-size:13px;">⚠️ Bu bilgisayarda yerel yazıcı yok ve şu an ağdan paylaşılan hiçbir yazıcı algılanmadı!</div>';
+                listDiv.innerHTML = '<div style="padding:12px; background:#0b1329; border:1px dashed #ef4444; border-radius:8px; color:#f87171; font-size:13px;">⚠️ Kullanılabilir fiziksel barkod yazıcısı bulunamadı (PDF/Fax gibi sanal yazıcılar filtrelenmiştir)!</div>';
+                return;
+            }
+
+            const yerelYazicilar = data.yazicilar.filter(p => !p.startsWith("["));
+            const agYazicilari = data.yazicilar.filter(p => p.startsWith("["));
+
+            if (yerelYazicilar.length > 0) {
+                const groupYerel = document.createElement("optgroup");
+                groupYerel.label = "⭐️ BU BİLGİSAYAR (YEREL)";
+                yerelYazicilar.forEach(p => {
+                    const opt = document.createElement("option");
+                    opt.value = p;
+                    opt.innerText = p;
+                    groupYerel.appendChild(opt);
+                });
+                select.appendChild(groupYerel);
+            }
+
+            if (agYazicilari.length > 0) {
+                const groupAg = document.createElement("optgroup");
+                groupAg.label = "🌐 AĞDAKİ DİĞER MASALAR";
+                agYazicilari.forEach(p => {
+                    const opt = document.createElement("option");
+                    opt.value = p;
+                    opt.innerText = p;
+                    groupAg.appendChild(opt);
+                });
+                select.appendChild(groupAg);
             }
 
             data.yazicilar.forEach(p => {
-                const opt = document.createElement("option");
-                opt.value = p;
-                opt.innerText = p;
-                select.appendChild(opt);
-
                 const isAg = p.startsWith("[");
                 const item = document.createElement("div");
                 item.className = "printer-item";
-                item.innerHTML = `<span>${isAg ? '🌐' : '🖨️'} ${p}</span> <span style="color:${isAg ? '#38bdf8' : '#10b981'}; font-size:11px;">${isAg ? 'Ağ Yazıcısı (TCP)' : 'Yerel'}</span>`;
+                item.innerHTML = `<span>${isAg ? '🌐' : '🖨️'} ${p}</span> <span style="color:${isAg ? '#38bdf8' : '#10b981'}; font-size:11px;">${isAg ? 'Ağ Yazıcısı (TCP)' : 'Yerel Yazıcı'}</span>`;
                 listDiv.appendChild(item);
             });
 
-            if (mevcutSecim) select.value = mevcutSecim;
+            // Seçimi koru veya hafızadaki son seçimi getir
+            const sonSecilen = localStorage.getItem("sonSecilenYazici");
+            if (mevcutSecim && data.yazicilar.includes(mevcutSecim)) {
+                select.value = mevcutSecim;
+            } else if (sonSecilen && data.yazicilar.includes(sonSecilen)) {
+                select.value = sonSecilen;
+            }
+        });
+
+        document.getElementById("hedefYazici").addEventListener("change", (e) => {
+            if (e.target.value) {
+                localStorage.setItem("sonSecilenYazici", e.target.value);
+            }
         });
 
         connection.on("BaskiSonucuAlindi", (ack) => {

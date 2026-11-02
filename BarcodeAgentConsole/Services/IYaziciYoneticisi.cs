@@ -20,6 +20,13 @@ public interface IYaziciYoneticisi
     /// </summary>
     bool AgPaylasimAcik { get; set; }
 
+    /// <summary>
+    /// PDF, OneNote, Fax gibi gereksiz sanal yazıcıların elenip elenmeyeceğini belirler.
+    /// </summary>
+    bool SanalYazicilariFiltrele { get; set; }
+
+    bool GecerliYaziciMi(string yaziciAdi);
+
     List<string> YerelYazicilariGetir();
     List<string> YukluYazicilariGetir();
     string VarsayilanYaziciyiGetir(string? configYazici = null);

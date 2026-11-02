@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Drawing.Printing;
 using System.Linq;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace BarcodeAgentConsole.Services;
@@ -17,15 +18,43 @@ public class YaziciYoneticisi : IYaziciYoneticisi
 
     public bool YerelYaziciYokSimulasyonu { get; set; } = false;
     public bool AgPaylasimAcik { get; set; } = true;
+    public bool SanalYazicilariFiltrele { get; set; } = true;
 
-    public YaziciYoneticisi(ILogger<YaziciYoneticisi> logger)
+    private static readonly string[] SanalYaziciKelimeleri = new[]
+    {
+        "pdf",
+        "onenote",
+        "fax",
+        "xps",
+        "document writer",
+        "root print queue",
+        "send to",
+        "snagit",
+        "anydesk"
+    };
+
+    public YaziciYoneticisi(ILogger<YaziciYoneticisi> logger, IConfiguration config)
     {
         _logger = logger;
+        if (bool.TryParse(config["Printer:SanalYazicilariFiltrele"], out bool filtre))
+        {
+            SanalYazicilariFiltrele = filtre;
+        }
+    }
+
+    public bool GecerliYaziciMi(string yaziciAdi)
+    {
+        if (string.IsNullOrWhiteSpace(yaziciAdi)) return false;
+        if (!SanalYazicilariFiltrele) return true;
+
+        string kucuk = yaziciAdi.ToLowerInvariant();
+        return !SanalYaziciKelimeleri.Any(s => kucuk.Contains(s));
     }
 
     /// <summary>
     /// Sadece bu bilgisayara doğrudan bağlı olan yerel yazıcıları getirir.
     /// Eğer bu bilgisayar "B Bilgisayarı (Yazıcısız İstemci)" modundaysa boş liste döner!
+    /// PDF, OneNote, Fax gibi sanal yazıcılar otomatik filtrelenir.
     /// </summary>
     public List<string> YerelYazicilariGetir()
     {
@@ -39,7 +68,10 @@ public class YaziciYoneticisi : IYaziciYoneticisi
         {
             foreach (string p in PrinterSettings.InstalledPrinters)
             {
-                yazicilar.Add(p);
+                if (GecerliYaziciMi(p))
+                {
+                    yazicilar.Add(p);
+                }
             }
         }
         catch (Exception ex)
@@ -190,7 +222,7 @@ public class YaziciYoneticisi : IYaziciYoneticisi
         {
             var printDoc = new PrintDocument();
             string varsayilan = printDoc.PrinterSettings.PrinterName;
-            if (!string.IsNullOrWhiteSpace(varsayilan))
+            if (!string.IsNullOrWhiteSpace(varsayilan) && GecerliYaziciMi(varsayilan))
             {
                 _logger.LogInformation("Sistem varsayılan yazıcısı algılandı: '{Yazici}'", varsayilan);
                 return varsayilan;
@@ -203,8 +235,11 @@ public class YaziciYoneticisi : IYaziciYoneticisi
 
         foreach (string printer in PrinterSettings.InstalledPrinters)
         {
-            _logger.LogInformation("İlk bulunan yazıcı seçildi: '{Yazici}'", printer);
-            return printer;
+            if (GecerliYaziciMi(printer))
+            {
+                _logger.LogInformation("İlk bulunan geçerli yazıcı seçildi: '{Yazici}'", printer);
+                return printer;
+            }
         }
 
         _logger.LogWarning("Sistemde kurulu herhangi bir yazıcı bulunamadı!");
