@@ -124,17 +124,28 @@ public static class AgGuvenlikKurulumu
                 if (key.GetValue(valueName) is not string rawVal || string.IsNullOrEmpty(rawVal))
                     continue;
 
-                if (!rawVal.Contains("Barkod Ajan", StringComparison.OrdinalIgnoreCase))
-                    continue;
-
                 if (!rawVal.Contains("Active=TRUE", StringComparison.OrdinalIgnoreCase) ||
-                    !rawVal.Contains("Action=Allow", StringComparison.OrdinalIgnoreCase) ||
                     !rawVal.Contains("Dir=In", StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
                 }
 
                 string expanded = Environment.ExpandEnvironmentVariables(rawVal);
+
+                // KRİTİK KONTROL: Windows'un otomatik oluşturduğu herhangi bir "Action=Block" (Engelle) kuralı varsa,
+                // Windows'ta Block kuralı her zaman Allow kuralını ezer! Bunu görür görmez temizlemek için false döndür:
+                if (expanded.Contains("Action=Block", StringComparison.OrdinalIgnoreCase) &&
+                    (expanded.Contains(arananApp, StringComparison.OrdinalIgnoreCase) ||
+                     expanded.Contains("barcodeagentconsole.exe", StringComparison.OrdinalIgnoreCase)))
+                {
+                    return false;
+                }
+
+                if (!expanded.Contains("Action=Allow", StringComparison.OrdinalIgnoreCase) ||
+                    !expanded.Contains("Barkod Ajan", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
 
                 if (expanded.Contains($"|Name={PortKuralAdi}|", StringComparison.OrdinalIgnoreCase) &&
                     expanded.Contains("5055", StringComparison.OrdinalIgnoreCase))
@@ -150,18 +161,15 @@ public static class AgGuvenlikKurulumu
                 {
                     pingTamam = true;
                 }
-
-                if (portTamam && programTamam && pingTamam)
-                    return true;
             }
+
+            return portTamam && programTamam && pingTamam;
         }
         catch
         {
             // Kayıt defteri okunamazsa kurulumu zorlamadan geç
             return true;
         }
-
-        return false;
     }
 
     private static bool YoneticiYetkisiVarMi()
@@ -200,10 +208,13 @@ public static class AgGuvenlikKurulumu
         SessizKomutCalistir("netsh.exe", $"advfirewall firewall delete rule name=\"{PortKuralAdi}\"");
         SessizKomutCalistir("netsh.exe", $"advfirewall firewall add rule name=\"{PortKuralAdi}\" dir=in action=allow protocol=TCP localport=5055-5064 profile=any enable=yes");
 
-        // 3. BarcodeAgentConsole.exe Program İzni
-        Console.WriteLine("[3/4] BarcodeAgentConsole.exe uygulama izni tanımlanıyor...");
+        // 3. BarcodeAgentConsole.exe Program İzni (Önce Windows'un olası "Engelle / Block" kurallarını tamamen temizle!)
+        Console.WriteLine("[3/4] BarcodeAgentConsole.exe engel kuralları temizlenip uygulama izni tanımlanıyor...");
+        SessizKomutCalistir("netsh.exe", "advfirewall firewall delete rule name=\"barcodeagentconsole.exe\"");
+        SessizKomutCalistir("netsh.exe", "advfirewall firewall delete rule name=\"BarcodeAgentConsole\"");
         if (!string.IsNullOrWhiteSpace(exeYolu))
         {
+            SessizKomutCalistir("netsh.exe", $"advfirewall firewall delete rule name=all program=\"{exeYolu}\"");
             SessizKomutCalistir("netsh.exe", $"advfirewall firewall delete rule name=\"{ProgramKuralAdi}\"");
             SessizKomutCalistir("netsh.exe", $"advfirewall firewall add rule name=\"{ProgramKuralAdi}\" dir=in action=allow program=\"{exeYolu}\" profile=any enable=yes");
         }

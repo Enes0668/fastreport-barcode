@@ -38,6 +38,10 @@ if (args.Any(a => string.Equals(a, "--rapor-test", StringComparison.OrdinalIgnor
 
 Console.Title = "FastReport Barkod Baskı Ajanı (Tek Dosya + Otomatik Kurulum)";
 
+// ÖNEMLİ: Hiçbir ağ portu (BosPortBul / Kestrel) açılmadan EN ÖNCE güvenlik duvarı kurallarını kontrol et ve uygula!
+// Böylece Windows'un kendi kafa karıştırıcı "Güvenlik Uyarısı" penceresi asla çıkmaz ve yanlışlıkla Block (Engelle) kuralı oluşmaz.
+AgGuvenlikKurulumu.GerekliyseOtomatikKurulumYap(args);
+
 var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 {
     Args = args,
@@ -122,9 +126,6 @@ Console.WriteLine($"   📡 Gömülü SignalR Hub : http://localhost:{aktifHubPo
 Console.WriteLine($"   🌐 HBYS Test Ekranı   : http://localhost:{aktifHubPort}");
 Console.WriteLine("=========================================================================");
 Console.ResetColor();
-
-// İlk kez çalıştırılıyorsa (veya yeni klasöre taşındıysa) 1 defaya mahsus otomatik Güvenlik Duvarı & Özel Ağ kurulumunu yap:
-AgGuvenlikKurulumu.GerekliyseOtomatikKurulumYap(args);
 
 await app.RunAsync();
 
