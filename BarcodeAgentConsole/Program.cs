@@ -36,6 +36,27 @@ if (args.Any(a => string.Equals(a, "--rapor-test", StringComparison.OrdinalIgnor
     return;
 }
 
+// TEKİL ÇALIŞMA (SINGLE INSTANCE) KONTROLÜ:
+// Eğer ajan zaten arka planda çalışıyorsa, masaüstündeki simgeye tekrar basıldığında
+// ikinci bir kopya açmak yerine arkadaki ajana 'Formu ekrana getir' sinyali verip hemen kapan:
+const string MutexAdi = "Local\\FastReportBarcodeAgent_SingleInstance_Mutex";
+const string WakeEventAdi = "Local\\FastReportBarcodeAgent_WakeEvent";
+
+bool olusturuldu;
+using var tekilMutex = new Mutex(true, MutexAdi, out olusturuldu);
+if (!olusturuldu)
+{
+    try
+    {
+        using var wakeEvent = EventWaitHandle.OpenExisting(WakeEventAdi);
+        wakeEvent.Set();
+    }
+    catch { }
+    return;
+}
+
+using var wakeEventHandle = new EventWaitHandle(false, EventResetMode.AutoReset, WakeEventAdi);
+
 Console.Title = "FastReport Barkod Baskı Ajanı (Tek Dosya + Otomatik Kurulum)";
 
 // ÖNEMLİ: Hiçbir ağ portu (BosPortBul / Kestrel) açılmadan EN ÖNCE güvenlik duvarı kurallarını kontrol et ve uygula!
@@ -144,7 +165,28 @@ if (!sessizMod)
             var yaziciServisi = app.Services.GetRequiredService<IYaziciServisi>();
             var yaziciYoneticisi = app.Services.GetRequiredService<IYaziciYoneticisi>();
 
-            Application.Run(new AnaForm(yaziciServisi, yaziciYoneticisi));
+            var anaForm = new AnaForm(yaziciServisi, yaziciYoneticisi);
+
+            // Dışarıdan (ikinci tıklamadan) gelen formu aç sinyalini bekle:
+            ThreadPool.RegisterWaitForSingleObject(wakeEventHandle, (state, timedOut) =>
+            {
+                if (!anaForm.IsDisposed)
+                {
+                    anaForm.BeginInvoke(new Action(anaForm.FormuGosterVeOdakla));
+                }
+            }, null, -1, false);
+
+            // Eğer Windows başlangıcında (--tray, --startup, --minimized) başlatılmışsa formu gizli başlat:
+            bool gizliBaslat = args.Any(a => string.Equals(a, "--tray", StringComparison.OrdinalIgnoreCase) ||
+                                             string.Equals(a, "--startup", StringComparison.OrdinalIgnoreCase) ||
+                                             string.Equals(a, "--minimized", StringComparison.OrdinalIgnoreCase));
+
+            if (gizliBaslat)
+            {
+                anaForm.BaslangictaGizle = true;
+            }
+
+            Application.Run(anaForm);
         }
         catch (Exception ex)
         {

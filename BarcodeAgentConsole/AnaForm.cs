@@ -26,6 +26,10 @@ public class AnaForm : Form
     private CheckBox chkOnizle = null!;
     private Label lblDurum = null!;
 
+    private NotifyIcon _notifyIcon = null!;
+    private bool _gercektenCik = false;
+    public bool BaslangictaGizle { get; set; } = false;
+
     public AnaForm(IYaziciServisi yaziciServisi, IYaziciYoneticisi yaziciYoneticisi)
     {
         _yaziciServisi = yaziciServisi;
@@ -179,6 +183,9 @@ public class AnaForm : Form
             AutoSize = true
         };
         Controls.Add(lblDurum);
+
+        // Windows Bildirim Alanı (System Tray) Simge ve Menüsü
+        BildirimAlaniniHazirla();
     }
 
     private void VerileriYukle()
@@ -348,6 +355,77 @@ public class AnaForm : Form
         else
         {
             MessageBox.Show(sonuc.Mesaj, "Baskı Başarısız", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+    }
+
+    private void BildirimAlaniniHazirla()
+    {
+        _notifyIcon = new NotifyIcon
+        {
+            Icon = SystemIcons.Application,
+            Text = "FastReport Barkod & Şablon Ajanı",
+            Visible = true
+        };
+
+        var menu = new ContextMenuStrip();
+        var itemGoster = new ToolStripMenuItem("🏥 Paneli Aç", null, (s, e) => FormuGosterVeOdakla());
+        itemGoster.Font = new Font(itemGoster.Font, FontStyle.Bold);
+
+        var itemCikis = new ToolStripMenuItem("❌ Tamamen Kapat (Çıkış)", null, (s, e) =>
+        {
+            _gercektenCik = true;
+            _notifyIcon.Visible = false;
+            _notifyIcon.Dispose();
+            Environment.Exit(0);
+        });
+
+        menu.Items.Add(itemGoster);
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add(itemCikis);
+
+        _notifyIcon.ContextMenuStrip = menu;
+        _notifyIcon.DoubleClick += (s, e) => FormuGosterVeOdakla();
+    }
+
+    public void FormuGosterVeOdakla()
+    {
+        if (InvokeRequired)
+        {
+            BeginInvoke(new Action(FormuGosterVeOdakla));
+            return;
+        }
+
+        BaslangictaGizle = false;
+        Show();
+        WindowState = FormWindowState.Normal;
+        ShowInTaskbar = true;
+        Activate();
+        BringToFront();
+    }
+
+    protected override void SetVisibleCore(bool value)
+    {
+        if (BaslangictaGizle && !IsHandleCreated)
+        {
+            CreateHandle();
+            value = false;
+        }
+        base.SetVisibleCore(value);
+    }
+
+    protected override void OnFormClosing(FormClosingEventArgs e)
+    {
+        if (!_gercektenCik && e.CloseReason == CloseReason.UserClosing)
+        {
+            e.Cancel = true;
+            Hide();
+            _notifyIcon.ShowBalloonTip(1500, "Barkod Ajanı", "Ajan arka planda çalışmaya devam ediyor. Açmak için saatin yanındaki simgeye tıklayabilirsiniz.", ToolTipIcon.Info);
+        }
+        else
+        {
+            _notifyIcon.Visible = false;
+            _notifyIcon.Dispose();
+            base.OnFormClosing(e);
         }
     }
 }
