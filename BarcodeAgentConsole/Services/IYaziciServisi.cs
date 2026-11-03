@@ -9,8 +9,12 @@ public interface IYaziciServisi
 {
     string VarsayilanYazici { get; set; }
     string SablonYolu { get; }
-    long SablonZamanDamgasiniGetir();
-    string SablonIceriginiGetir();
-    bool SablonuGuncelle(string yeniFrxXmlIcerik, long yeniZamanDamgasi);
-    (bool Basarili, string Mesaj) BarkodBas(string istekId, string? ozelYazici = null, Dictionary<string, string>? parametreler = null);
+    string SablonlarKlasoru { get; }
+    List<string> MevcutSablonlariGetir();
+    long SablonZamanDamgasiniGetir(string? ozelSablonAdi = null);
+    Dictionary<string, long> SablonKatalogunuGetir();
+    string SablonIceriginiGetir(string? ozelSablonAdi = null);
+    bool SablonuGuncelle(string yeniFrxXmlIcerik, long yeniZamanDamgasi, string? ozelSablonAdi = null);
+    bool YeniSablonOlustur(string sablonAdi, bool a4Modu = false);
+    (bool Basarili, string Mesaj) BarkodBas(string istekId, string? ozelYazici = null, Dictionary<string, string>? parametreler = null, string? sablonAdi = null);
 }

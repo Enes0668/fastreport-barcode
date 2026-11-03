@@ -35,10 +35,12 @@ public class YerelBarkodHub : Hub
 
         // Bağlanan web ekranına anında bu bilgisayardaki + ağdan (TCP) gelen tüm yazıcıları gönder ve hızlı tarama tetikle
         var yazicilar = _yaziciYoneticisi.YukluYazicilariGetir();
+        var sablonlar = _yaziciServisi.MevcutSablonlariGetir();
         await Clients.Caller.SendAsync("YazicilarAlindi", new
         {
             connectionId = Context.ConnectionId,
             yazicilar = yazicilar,
+            sablonlar = sablonlar,
             yerelYaziciYokModu = _yaziciYoneticisi.YerelYaziciYokSimulasyonu,
             agPaylasimAcik = _yaziciYoneticisi.AgPaylasimAcik,
             ilkTaramaTamamlandi = _yaziciYoneticisi.IlkAgTaramasiTamamlandi,
@@ -75,10 +77,10 @@ public class YerelBarkodHub : Hub
     public async Task BarkodYazdirGelismi(BarkodEmirModel emir)
     {
         string hedef = emir.HedefYazici ?? _yaziciServisi.VarsayilanYazici;
-        _logger.LogInformation("📥 [YEREL HUB] Web'den 'BarkodYazdirGelismi' emri alındı -> İstek #{IstekId}, Hedef: '{Yazici}'",
-            emir.IstekId, hedef);
+        _logger.LogInformation("📥 [YEREL HUB] Web'den 'BarkodYazdirGelismi' emri alındı -> İstek #{IstekId}, Hedef: '{Yazici}', Şablon: '{Sablon}'",
+            emir.IstekId, hedef, emir.SablonAdi ?? "Varsayılan");
 
-        var sonuc = _yaziciServisi.BarkodBas(emir.IstekId, emir.HedefYazici, emir.Parametreler);
+        var sonuc = _yaziciServisi.BarkodBas(emir.IstekId, emir.HedefYazici, emir.Parametreler, emir.SablonAdi);
 
         await Clients.All.SendAsync("BaskiSonucuAlindi", new BarkodSonucModel
         {
@@ -91,16 +93,18 @@ public class YerelBarkodHub : Hub
     }
 
     /// <summary>
-    /// Web ekranı güncel yazıcı listesini istediğinde tetiklenir.
+    /// Web ekranı güncel yazıcı ve şablon listesini istediğinde tetiklenir.
     /// </summary>
     public async Task YazicilariGetir()
     {
         _yaziciYoneticisi.AgTaramasiTetikle();
         var yazicilar = _yaziciYoneticisi.YukluYazicilariGetir();
+        var sablonlar = _yaziciServisi.MevcutSablonlariGetir();
         await Clients.All.SendAsync("YazicilarAlindi", new
         {
             connectionId = Context.ConnectionId,
             yazicilar = yazicilar,
+            sablonlar = sablonlar,
             yerelYaziciYokModu = _yaziciYoneticisi.YerelYaziciYokSimulasyonu,
             agPaylasimAcik = _yaziciYoneticisi.AgPaylasimAcik,
             ilkTaramaTamamlandi = _yaziciYoneticisi.IlkAgTaramasiTamamlandi,

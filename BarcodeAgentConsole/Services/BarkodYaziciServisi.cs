@@ -13,6 +13,7 @@ namespace BarcodeAgentConsole.Services;
 
 public class BarkodYaziciServisi : IYaziciServisi
 {
+    private readonly string _sablonlarKlasoru;
     private readonly string _sablonYolu;
     private readonly string _postgresConnectionString;
     private readonly IConfiguration _config;
@@ -21,54 +22,160 @@ public class BarkodYaziciServisi : IYaziciServisi
 
     public string VarsayilanYazici { get; set; }
     public string SablonYolu => _sablonYolu;
+    public string SablonlarKlasoru => _sablonlarKlasoru;
 
-    public long SablonZamanDamgasiniGetir()
+    public List<string> MevcutSablonlariGetir()
+    {
+        var liste = new List<string>();
+        try
+        {
+            if (Directory.Exists(_sablonlarKlasoru))
+            {
+                foreach (var dosya in Directory.GetFiles(_sablonlarKlasoru, "*.frx"))
+                {
+                    liste.Add(Path.GetFileName(dosya));
+                }
+            }
+        }
+        catch { }
+
+        if (!liste.Any(s => s.Equals(Path.GetFileName(_sablonYolu), StringComparison.OrdinalIgnoreCase)) && File.Exists(_sablonYolu))
+        {
+            liste.Insert(0, Path.GetFileName(_sablonYolu));
+        }
+
+        return liste.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    public long SablonZamanDamgasiniGetir(string? ozelSablonAdi = null)
     {
         try
         {
-            if (File.Exists(_sablonYolu))
+            string yol = HedefSablonYolunuBul(ozelSablonAdi);
+            if (File.Exists(yol))
             {
-                return File.GetLastWriteTimeUtc(_sablonYolu).Ticks;
+                return File.GetLastWriteTimeUtc(yol).Ticks;
             }
         }
         catch { }
         return 0;
     }
 
-    public string SablonIceriginiGetir()
+    public Dictionary<string, long> SablonKatalogunuGetir()
+    {
+        var katalog = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+        foreach (var sablonAdi in MevcutSablonlariGetir())
+        {
+            katalog[sablonAdi] = SablonZamanDamgasiniGetir(sablonAdi);
+        }
+        return katalog;
+    }
+
+    public string SablonIceriginiGetir(string? ozelSablonAdi = null)
     {
         try
         {
-            if (File.Exists(_sablonYolu))
+            string yol = HedefSablonYolunuBul(ozelSablonAdi);
+            if (File.Exists(yol))
             {
-                return File.ReadAllText(_sablonYolu, Encoding.UTF8);
+                return File.ReadAllText(yol, Encoding.UTF8);
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Şablon içeriği okunurken hata oluştu: {Yol}", _sablonYolu);
+            _logger.LogError(ex, "Şablon içeriği okunurken hata oluştu: {Sablon}", ozelSablonAdi);
         }
         return string.Empty;
     }
 
-    public bool SablonuGuncelle(string yeniFrxXmlIcerik, long yeniZamanDamgasi)
+    public bool SablonuGuncelle(string yeniFrxXmlIcerik, long yeniZamanDamgasi, string? ozelSablonAdi = null)
     {
         try
         {
             if (string.IsNullOrWhiteSpace(yeniFrxXmlIcerik)) return false;
 
-            File.WriteAllText(_sablonYolu, yeniFrxXmlIcerik, Encoding.UTF8);
+            string yol = HedefSablonYolunuBul(ozelSablonAdi, olusturulsunMu: true);
+            File.WriteAllText(yol, yeniFrxXmlIcerik, Encoding.UTF8);
             if (yeniZamanDamgasi > 0)
             {
-                File.SetLastWriteTimeUtc(_sablonYolu, new DateTime(yeniZamanDamgasi, DateTimeKind.Utc));
+                File.SetLastWriteTimeUtc(yol, new DateTime(yeniZamanDamgasi, DateTimeKind.Utc));
             }
 
-            _logger.LogInformation("🔄 [ŞABLON GÜNCELLENDİ] Ağdan gelen yeni .frx şablonu başarıyla diske kaydedildi! ({Yol})", _sablonYolu);
+            _logger.LogInformation("🔄 [ŞABLON GÜNCELLENDİ] '{Sablon}' şablonu diske kaydedildi! ({Yol})", Path.GetFileName(yol), yol);
             return true;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Ağdan gelen şablon kaydedilirken hata oluştu: {Yol}", _sablonYolu);
+            _logger.LogError(ex, "Ağdan gelen şablon kaydedilirken hata oluştu: {Sablon}", ozelSablonAdi);
+            return false;
+        }
+    }
+
+    public bool YeniSablonOlustur(string sablonAdi, bool a4Modu = false)
+    {
+        try
+        {
+            if (!sablonAdi.EndsWith(".frx", StringComparison.OrdinalIgnoreCase))
+                sablonAdi += ".frx";
+
+            string hedef = Path.Combine(_sablonlarKlasoru, sablonAdi);
+            if (File.Exists(hedef)) return true;
+
+            using (var rep = new Report())
+            {
+                var page = new ReportPage
+                {
+                    Name = "Page1",
+                    PaperWidth = a4Modu ? 210 : 100,
+                    PaperHeight = a4Modu ? 297 : 50,
+                    LeftMargin = a4Modu ? 10 : 2,
+                    RightMargin = a4Modu ? 10 : 2,
+                    TopMargin = a4Modu ? 10 : 2,
+                    BottomMargin = a4Modu ? 10 : 2
+                };
+
+                var band = new DataBand
+                {
+                    Name = "Data1",
+                    Height = FastReport.Utils.Units.Millimeters * (a4Modu ? 40 : 46)
+                };
+                page.Bands.Add(band);
+
+                var txtBaslik = new TextObject
+                {
+                    Name = "txtBaslik",
+                    Bounds = new System.Drawing.RectangleF(0, 0, FastReport.Utils.Units.Millimeters * (a4Modu ? 190 : 96), 25),
+                    Text = a4Modu ? "[HASTANE RAPORU / REÇETE]" : "[HastaAdi]",
+                    HorzAlign = HorzAlign.Center,
+                    Font = new System.Drawing.Font("Arial", a4Modu ? 12 : 10, System.Drawing.FontStyle.Bold)
+                };
+                band.Objects.Add(txtBaslik);
+
+                var barcode = new FastReport.Barcode.BarcodeObject
+                {
+                    Name = "Barcode1",
+                    Bounds = new System.Drawing.RectangleF(FastReport.Utils.Units.Millimeters * 10, 30, FastReport.Utils.Units.Millimeters * 80, 60),
+                    Barcode = new FastReport.Barcode.Barcode128(),
+                    Expression = "[BarkodNo]"
+                };
+                band.Objects.Add(barcode);
+
+                rep.Parameters.Add(new FastReport.Data.Parameter("IstekId") { DataType = typeof(string), Value = "504" });
+                rep.Parameters.Add(new FastReport.Data.Parameter("BarkodNo") { DataType = typeof(string), Value = "869012345" });
+                rep.Parameters.Add(new FastReport.Data.Parameter("HastaAdi") { DataType = typeof(string), Value = "Test Hasta" });
+                rep.Parameters.Add(new FastReport.Data.Parameter("ProtokolNo") { DataType = typeof(string), Value = "P-504" });
+                rep.Parameters.Add(new FastReport.Data.Parameter("Bolum") { DataType = typeof(string), Value = "Poliklinik" });
+
+                rep.Pages.Add(page);
+                rep.Save(hedef);
+            }
+
+            _logger.LogInformation("✨ Yeni şablon oluşturuldu: {Ad}", sablonAdi);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Yeni şablon oluşturulamadı: {Ad}", sablonAdi);
             return false;
         }
     }
@@ -83,11 +190,18 @@ public class BarkodYaziciServisi : IYaziciServisi
         _yaziciYoneticisi = yaziciYoneticisi;
         _postgresConnectionString = config["ConnectionStrings:PostgreSql"] ?? string.Empty;
 
+        string anaDizin = Path.GetDirectoryName(Environment.ProcessPath) ?? AppContext.BaseDirectory;
+        _sablonlarKlasoru = Path.Combine(anaDizin, "Sablonlar");
+        Directory.CreateDirectory(_sablonlarKlasoru);
+
         string configYazici = config["Printer:Name"] ?? string.Empty;
         VarsayilanYazici = yaziciYoneticisi.VarsayilanYaziciyiGetir(configYazici);
 
         string? ozelSablonYolu = config["TemplatePath"] ?? "../etiket_sablonu.frx";
         _sablonYolu = SablonYolunuBelirle(ozelSablonYolu);
+
+        // Varsayılan 3 şablonu (Etiket, Hasta Bilekliği, A4 Sonuç Raporu) klasörde yoksa otomatik oluştur:
+        VarsayilanTemelSablonlariYukle();
 
         // FastReport motoruna PostgreSQL bağlantı sürücüsünü kaydet
         try
@@ -99,17 +213,59 @@ public class BarkodYaziciServisi : IYaziciServisi
             _logger.LogWarning(ex, "PostgresDataConnection kaydı yapılırken uyarı oluştu.");
         }
 
-        _logger.LogInformation("BarkodYaziciServisi hazır. Şablon: '{Sablon}', Varsayılan Yazıcı: '{Yazici}'",
-            _sablonYolu, VarsayilanYazici);
+        _logger.LogInformation("BarkodYaziciServisi hazır. Şablonlar Klasörü: '{Klasor}', Varsayılan: '{Sablon}'",
+            _sablonlarKlasoru, Path.GetFileName(_sablonYolu));
+    }
+
+    private void VarsayilanTemelSablonlariYukle()
+    {
+        // 1. kan_tupu_sablonu.frx (Termal barkod yazıcı için küçük tüp etiketi)
+        string kanTupu = Path.Combine(_sablonlarKlasoru, "kan_tupu_sablonu.frx");
+        if (!File.Exists(kanTupu))
+        {
+            if (File.Exists(_sablonYolu)) File.Copy(_sablonYolu, kanTupu, overwrite: true);
+            else YeniSablonOlustur("kan_tupu_sablonu.frx", a4Modu: false);
+        }
+
+        // 2. hasta_bileklik_sablonu.frx (Termal barkod yazıcı için bileklik)
+        string hastaBileklik = Path.Combine(_sablonlarKlasoru, "hasta_bileklik_sablonu.frx");
+        if (!File.Exists(hastaBileklik))
+        {
+            YeniSablonOlustur("hasta_bileklik_sablonu.frx", a4Modu: false);
+        }
+
+        // 3. dosya_barkod_a4.frx (Normal lazer / A4 yazıcı için sonuç & dosya raporu)
+        string dosyaA4 = Path.Combine(_sablonlarKlasoru, "dosya_barkod_a4.frx");
+        if (!File.Exists(dosyaA4))
+        {
+            YeniSablonOlustur("dosya_barkod_a4.frx", a4Modu: true);
+        }
+    }
+
+    private string HedefSablonYolunuBul(string? ozelSablonAdi, bool olusturulsunMu = false)
+    {
+        if (string.IsNullOrWhiteSpace(ozelSablonAdi))
+            return _sablonYolu;
+
+        if (!ozelSablonAdi.EndsWith(".frx", StringComparison.OrdinalIgnoreCase))
+            ozelSablonAdi += ".frx";
+
+        string klasordeki = Path.Combine(_sablonlarKlasoru, ozelSablonAdi);
+        if (File.Exists(klasordeki) || olusturulsunMu)
+            return klasordeki;
+
+        string kokteki = Path.Combine(Path.GetDirectoryName(_sablonYolu) ?? AppContext.BaseDirectory, ozelSablonAdi);
+        if (File.Exists(kokteki))
+            return kokteki;
+
+        return klasordeki;
     }
 
     /// <summary>
     /// TEK VE ANA BASKI METODU:
-    /// Eğer seçilen yazıcı yerel ağdaki başka bir Agent'a (örn. A bilgisayarına) aitse,
-    /// baskı emrini ve parametreleri ağ üzerinden o bilgisayara yönlendirir.
-    /// Yerel yazıcı ise doğrudan FastReport ile bu bilgisayardan basar.
+    /// İstenen şablonu (Kan Tüpü, Bileklik, A4 Dosya) ilgili yazıcıya (Zebra veya Brother) gönderir.
     /// </summary>
-    public (bool Basarili, string Mesaj) BarkodBas(string istekId, string? ozelYazici = null, Dictionary<string, string>? parametreler = null)
+    public (bool Basarili, string Mesaj) BarkodBas(string istekId, string? ozelYazici = null, Dictionary<string, string>? parametreler = null, string? sablonAdi = null)
     {
         if (string.IsNullOrWhiteSpace(istekId))
         {
@@ -132,7 +288,7 @@ public class BarkodYaziciServisi : IYaziciServisi
         // 2. KADEME KONTROLÜ: Seçilen yazıcı ağdaki diğer bilgisayara (örn. PC-A) mı ait?
         if (_yaziciYoneticisi.AgYazicisiMi(hedefYazici, out string hedefIp, out int hedefPort, out string gercekYaziciAdi))
         {
-            var agSonuc = AgdakiBilgisayaraBaskiGonder(istekId, hedefIp, hedefPort, gercekYaziciAdi, parametreler);
+            var agSonuc = AgdakiBilgisayaraBaskiGonder(istekId, hedefIp, hedefPort, gercekYaziciAdi, parametreler, sablonAdi);
             if (!agSonuc.Basarili)
             {
                 // Karşı yazıcı çıkarılmışsa listeyi de anında yenilemesi için taramayı tetikle
@@ -160,16 +316,17 @@ public class BarkodYaziciServisi : IYaziciServisi
 
         try
         {
-            if (!File.Exists(_sablonYolu))
+            string aktifSablonYolu = HedefSablonYolunuBul(sablonAdi);
+            if (!File.Exists(aktifSablonYolu))
             {
-                string msg = $"Şablon dosyası bulunamadı: {_sablonYolu}";
+                string msg = $"Şablon dosyası bulunamadı: {aktifSablonYolu}";
                 _logger.LogError("{Mesaj}", msg);
                 return (false, msg);
             }
 
             using (Report report = new Report())
             {
-                report.Load(_sablonYolu);
+                report.Load(aktifSablonYolu);
 
                 // 1. PostgreSQL bağlantı dizesini şablona enjekte et (varsa)
                 if (!string.IsNullOrWhiteSpace(_postgresConnectionString))
@@ -194,7 +351,7 @@ public class BarkodYaziciServisi : IYaziciServisi
                 report.PrintSettings.ShowDialog = false;
                 report.PrintPrepared();
 
-                string msg = $"İstek #{istekId} başarıyla '{hedefYazici}' yazıcısına gönderildi.";
+                string msg = $"İstek #{istekId} başarıyla '{Path.GetFileName(aktifSablonYolu)}' şablonuyla '{hedefYazici}' yazıcısına gönderildi.";
                 _logger.LogInformation("{Mesaj}", msg);
                 return (true, msg);
             }
@@ -260,12 +417,13 @@ public class BarkodYaziciServisi : IYaziciServisi
         string hedefIp,
         int hedefPort,
         string gercekYaziciAdi,
-        Dictionary<string, string>? parametreler = null)
+        Dictionary<string, string>? parametreler = null,
+        string? sablonAdi = null)
     {
         try
         {
-            _logger.LogInformation("📤 [AĞ YÖNLENDİRME] İstek #{IstekId} -> {Ip}:{Port} adresindeki '{Yazici}' yazıcısına gönderiliyor...",
-                istekId, hedefIp, hedefPort, gercekYaziciAdi);
+            _logger.LogInformation("📤 [AĞ YÖNLENDİRME] İstek #{IstekId} -> {Ip}:{Port} adresindeki '{Yazici}' yazıcısına (Şablon: {Sablon}) gönderiliyor...",
+                istekId, hedefIp, hedefPort, gercekYaziciAdi, sablonAdi ?? "Varsayılan");
 
             using var tcpClient = new TcpClient();
             tcpClient.Connect(hedefIp, hedefPort);
@@ -279,6 +437,7 @@ public class BarkodYaziciServisi : IYaziciServisi
                 GonderenAjan = Environment.MachineName,
                 IstekId = istekId,
                 HedefYazici = gercekYaziciAdi,
+                SablonAdi = sablonAdi,
                 Parametreler = parametreler
             };
 

@@ -162,7 +162,8 @@ public class BarkodAjanWorker : BackgroundService
             IpAdresi = _yerelIp,
             TcpPort = _aktifTcpPort,
             Yazicilar = _yaziciYoneticisi.AgPaylasimAcik ? _yaziciYoneticisi.YerelYazicilariGetir() : new List<string>(),
-            SablonZamanDamgasi = _yaziciServisi.SablonZamanDamgasiniGetir()
+            SablonZamanDamgasi = _yaziciServisi.SablonZamanDamgasiniGetir(),
+            SablonKatalogu = _yaziciServisi.SablonKatalogunuGetir()
         };
     }
 
@@ -182,17 +183,19 @@ public class BarkodAjanWorker : BackgroundService
             // 1. İŞLEM: Karşı bilgisayar bizdeki güncel .frx şablonunu istiyorsa:
             if (istek.IslemTuru == "SablonTalep")
             {
-                string sablonIcerik = _yaziciServisi.SablonIceriginiGetir();
-                long zamanDamgasi = _yaziciServisi.SablonZamanDamgasiniGetir();
+                string talepEdilen = istek.TalepEdilenSablonAdi ?? string.Empty;
+                string sablonIcerik = _yaziciServisi.SablonIceriginiGetir(talepEdilen);
+                long zamanDamgasi = _yaziciServisi.SablonZamanDamgasiniGetir(talepEdilen);
 
                 var sablonPaketi = new
                 {
+                    SablonAdi = talepEdilen,
                     ZamanDamgasi = zamanDamgasi,
                     Icerik = sablonIcerik
                 };
 
                 await writer.WriteLineAsync(JsonSerializer.Serialize(sablonPaketi));
-                _logger.LogInformation("📤 [ŞABLON GÖNDERİLDİ] {Gonderen} ajanı bizdeki güncel .frx şablonunu indirdi.", istek.GonderenAjan);
+                _logger.LogInformation("📤 [ŞABLON GÖNDERİLDİ] {Gonderen} ajanı bizdeki '{Sablon}' şablonunu indirdi.", istek.GonderenAjan, talepEdilen);
                 return;
             }
 
@@ -221,14 +224,24 @@ public class BarkodAjanWorker : BackgroundService
                         _ = YazicilariWebEBildirAsync();
                     }
 
-                    long bizdekiZaman = _yaziciServisi.SablonZamanDamgasiniGetir();
-                    if (istek.GonderenPaket.SablonZamanDamgasi > bizdekiZaman && !string.IsNullOrWhiteSpace(istek.GonderenPaket.IpAdresi))
+                    // Çoklu Şablon Kataloğu Eşitlemesi: Karşıdaki yeni veya güncel tüm şablonları indir!
+                    if (istek.GonderenPaket.SablonKatalogu != null && !string.IsNullOrWhiteSpace(istek.GonderenPaket.IpAdresi))
                     {
                         string sIp = istek.GonderenPaket.IpAdresi;
                         int sPort = istek.GonderenPaket.TcpPort;
                         string sAjan = istek.GonderenPaket.AjanAdi;
-                        long sZaman = istek.GonderenPaket.SablonZamanDamgasi;
-                        _ = Task.Run(() => AgdakiGuncelSablonuIndirAsync(sIp, sPort, sAjan, sZaman));
+
+                        foreach (var kvp in istek.GonderenPaket.SablonKatalogu)
+                        {
+                            string sAd = kvp.Key;
+                            long karsiZaman = kvp.Value;
+                            long bizdekiZaman = _yaziciServisi.SablonZamanDamgasiniGetir(sAd);
+
+                            if (karsiZaman > bizdekiZaman)
+                            {
+                                _ = Task.Run(() => AgdakiGuncelSablonuIndirAsync(sIp, sPort, sAjan, sAd, karsiZaman));
+                            }
+                        }
                     }
                 }
 
@@ -238,10 +251,10 @@ public class BarkodAjanWorker : BackgroundService
             }
 
             // 3. İŞLEM: Normal Ağ Baskı İsteği:
-            _logger.LogInformation("📥 [AĞDAN BASKI GELDİ] Gönderen: {Gonderen} -> İstek #{IstekId}, Hedef Yazıcı: '{Yazici}'",
-                istek.GonderenAjan, istek.IstekId, istek.HedefYazici);
+            _logger.LogInformation("📥 [AĞDAN BASKI GELDİ] Gönderen: {Gonderen} -> İstek #{IstekId}, Hedef Yazıcı: '{Yazici}' (Şablon: {Sablon})",
+                istek.GonderenAjan, istek.IstekId, istek.HedefYazici, istek.SablonAdi ?? "Varsayılan");
 
-            var sonuc = _yaziciServisi.BarkodBas(istek.IstekId, istek.HedefYazici, istek.Parametreler);
+            var sonuc = _yaziciServisi.BarkodBas(istek.IstekId, istek.HedefYazici, istek.Parametreler, istek.SablonAdi);
 
             var yanit = new BarkodSonucModel
             {
@@ -477,11 +490,32 @@ public class BarkodAjanWorker : BackgroundService
                 await YazicilariWebEBildirAsync();
             }
 
-            // Şablon kontrolü de yap
-            long bizdekiZaman = _yaziciServisi.SablonZamanDamgasiniGetir();
-            if (paket.SablonZamanDamgasi > bizdekiZaman)
+            // Çoklu Şablon Kataloğu Eşitlemesi:
+            if (paket.SablonKatalogu != null && paket.SablonKatalogu.Count > 0 && !string.IsNullOrWhiteSpace(paket.IpAdresi))
             {
-                _ = Task.Run(() => AgdakiGuncelSablonuIndirAsync(paket.IpAdresi, paket.TcpPort, paket.AjanAdi, paket.SablonZamanDamgasi));
+                string sIp = paket.IpAdresi;
+                int sPort = paket.TcpPort;
+                string sAjan = paket.AjanAdi;
+
+                foreach (var kvp in paket.SablonKatalogu)
+                {
+                    string sAd = kvp.Key;
+                    long karsiZaman = kvp.Value;
+                    long bizdekiZaman = _yaziciServisi.SablonZamanDamgasiniGetir(sAd);
+
+                    if (karsiZaman > bizdekiZaman)
+                    {
+                        _ = Task.Run(() => AgdakiGuncelSablonuIndirAsync(sIp, sPort, sAjan, sAd, karsiZaman));
+                    }
+                }
+            }
+            else
+            {
+                long bizdekiZaman = _yaziciServisi.SablonZamanDamgasiniGetir();
+                if (paket.SablonZamanDamgasi > bizdekiZaman && !string.IsNullOrWhiteSpace(paket.IpAdresi))
+                {
+                    _ = Task.Run(() => AgdakiGuncelSablonuIndirAsync(paket.IpAdresi, paket.TcpPort, paket.AjanAdi, "etiket_sablonu.frx", paket.SablonZamanDamgasi));
+                }
             }
         }
         catch
@@ -496,9 +530,9 @@ public class BarkodAjanWorker : BackgroundService
 
     /// <summary>
     /// Ağdaki başka bir bilgisayarda (örn. tasarımcının kaydettiği PC'de) daha yeni bir .frx şablonu algılandığında,
-    /// TCP üzerinden o şablonu kayıpsız indirir ve yerel klasöründeki etiket_sablonu.frx dosyasını günceller.
+    /// TCP üzerinden o şablonu kayıpsız indirir ve Sablonlar klasörüne kaydeder.
     /// </summary>
-    private async Task AgdakiGuncelSablonuIndirAsync(string hedefIp, int hedefPort, string kaynakAjan, long yeniZamanDamgasi)
+    private async Task AgdakiGuncelSablonuIndirAsync(string hedefIp, int hedefPort, string kaynakAjan, string sablonAdi, long yeniZamanDamgasi)
     {
         try
         {
@@ -512,7 +546,8 @@ public class BarkodAjanWorker : BackgroundService
             var talepPaketi = new AgBaskiIstekPaketi
             {
                 GonderenAjan = _ajanAdi,
-                IslemTuru = "SablonTalep"
+                IslemTuru = "SablonTalep",
+                TalepEdilenSablonAdi = sablonAdi
             };
 
             await writer.WriteLineAsync(JsonSerializer.Serialize(talepPaketi));
@@ -526,17 +561,17 @@ public class BarkodAjanWorker : BackgroundService
                 string xmlIcerik = icerikElem.GetString() ?? string.Empty;
                 if (!string.IsNullOrWhiteSpace(xmlIcerik))
                 {
-                    bool guncellendi = _yaziciServisi.SablonuGuncelle(xmlIcerik, yeniZamanDamgasi);
+                    bool guncellendi = _yaziciServisi.SablonuGuncelle(xmlIcerik, yeniZamanDamgasi, sablonAdi);
                     if (guncellendi)
                     {
-                        _logger.LogInformation("✨ [ŞABLON EŞİTLENDİ] {KaynakAjan} bilgisayarındaki yeni .frx şablonu bu bilgisayara otomatik eşitlendi!", kaynakAjan);
+                        _logger.LogInformation("✨ [ŞABLON EŞİTLENDİ] {KaynakAjan} bilgisayarındaki yeni '{Sablon}' şablonu bu bilgisayara otomatik eşitlendi!", kaynakAjan, sablonAdi);
                     }
                 }
             }
         }
         catch (Exception ex)
         {
-            _logger.LogDebug("Şablon senkronizasyonu denenirken uyarı: {Hata}", ex.Message);
+            _logger.LogDebug("Şablon senkronizasyonu ({Sablon}) denenirken uyarı: {Hata}", sablonAdi, ex.Message);
         }
     }
 

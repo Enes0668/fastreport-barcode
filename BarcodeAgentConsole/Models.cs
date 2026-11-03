@@ -11,6 +11,7 @@ public class BarkodEmirModel
 {
     public string IstekId { get; set; } = string.Empty;
     public string? HedefYazici { get; set; }
+    public string? SablonAdi { get; set; }
     public Dictionary<string, string>? Parametreler { get; set; }
 }
 
@@ -38,10 +39,14 @@ public class AjanPaylasimPaketi
     public List<string> Yazicilar { get; set; } = new();
 
     /// <summary>
-    /// Bu bilgisayardaki etiket_sablonu.frx dosyasının son değiştirilme zamanı (UTC Ticks).
-    /// Ağdaki diğer bilgisayarlar bu değere bakarak daha yeni bir şablon olup olmadığını anlar.
+    /// Geriye dönük uyumluluk için tekil şablon zaman damgası.
     /// </summary>
     public long SablonZamanDamgasi { get; set; }
+
+    /// <summary>
+    /// Tüm şablonların adları ve zaman damgaları kataloğu: Key = Şablon Adı (örn: kan_tupu.frx), Value = Zaman Damgası
+    /// </summary>
+    public Dictionary<string, long> SablonKatalogu { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }
 
 /// <summary>
@@ -53,13 +58,19 @@ public class AgBaskiIstekPaketi
     public string GonderenAjan { get; set; } = string.Empty;
     public string IstekId { get; set; } = string.Empty;
     public string HedefYazici { get; set; } = string.Empty;
+    public string? SablonAdi { get; set; }
     public Dictionary<string, string>? Parametreler { get; set; }
 
     /// <summary>
-    /// Eğer "SablonTalep" ise karşı bilgisayar .frx dosyasının içeriğini döndürür.
+    /// Eğer "SablonTalep" ise karşı bilgisayar TalepEdilenSablonAdi ile belirtilen .frx dosyasının içeriğini döndürür.
     /// Eğer "YazicilariVer" ise çift yönlü yazıcı ve şablon el sıkışması yapar.
     /// </summary>
     public string IslemTuru { get; set; } = "Baski";
+
+    /// <summary>
+    /// Talep edilen şablonun adı (örn: kan_tupu.frx veya dosya_barkod_a4.frx).
+    /// </summary>
+    public string? TalepEdilenSablonAdi { get; set; }
 
     /// <summary>
     /// Çift yönlü anında keşif: İsteği gönderen bilgisayar kendi yazıcı listesini de pakete ekler,
