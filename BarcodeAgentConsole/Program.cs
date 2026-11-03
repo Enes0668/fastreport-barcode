@@ -14,7 +14,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
 
-Console.OutputEncoding = Encoding.UTF8;
+try { Console.OutputEncoding = Encoding.UTF8; } catch { }
 
 // 0. Yönetici alt süreci olarak "--kurulum-yap" ile çağrıldıysa güvenlik duvarı kurallarını uygula ve çık:
 if (AgGuvenlikKurulumu.KurulumAltSureciMiVeCalistir(args))
@@ -57,7 +57,7 @@ if (!olusturuldu)
 
 using var wakeEventHandle = new EventWaitHandle(false, EventResetMode.AutoReset, WakeEventAdi);
 
-Console.Title = "FastReport Barkod Baskı Ajanı (Tek Dosya + Otomatik Kurulum)";
+try { Console.Title = "FastReport Barkod Baskı Ajanı (Tek Dosya + Otomatik Kurulum)"; } catch { }
 
 // ÖNEMLİ: Hiçbir ağ portu (BosPortBul / Kestrel) açılmadan EN ÖNCE güvenlik duvarı kurallarını kontrol et ve uygula!
 // Böylece Windows'un kendi kafa karıştırıcı "Güvenlik Uyarısı" penceresi asla çıkmaz ve yanlışlıkla Block (Engelle) kuralı oluşmaz.
@@ -140,13 +140,13 @@ app.MapGet("/api/yazicilari-yenile", async (IHubContext<YerelBarkodHub> hubConte
 // 6. Gömülü HBYS Simülasyon / Test Ekranı (Merkezi sunucu olmadan doğrudan Agent üzerinden açılır)
 app.MapGet("/", () => Results.Content(YerelDashboardHtml.Content, "text/html; charset=utf-8"));
 
-Console.ForegroundColor = ConsoleColor.Cyan;
+try { Console.ForegroundColor = ConsoleColor.Cyan; } catch { }
 Console.WriteLine("=========================================================================");
 Console.WriteLine("   🏥 FASTREPORT BARKOD BASKI AJANI (TEK DOSYA + OTOMATİK KURULUM)      ");
 Console.WriteLine($"   📡 Gömülü SignalR Hub : http://localhost:{aktifHubPort}/barkodHub");
 Console.WriteLine($"   🌐 HBYS Test Ekranı   : http://localhost:{aktifHubPort}");
 Console.WriteLine("=========================================================================");
-Console.ResetColor();
+try { Console.ResetColor(); } catch { }
 
 // Arka planda SignalR Hub, TCP 5055 dinleyicisi ve ağ paylaşımını kesintisiz çalıştır:
 var webTask = app.RunAsync();
