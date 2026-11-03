@@ -29,6 +29,7 @@ public class AnaForm : Form
     private NotifyIcon _notifyIcon = null!;
     private bool _gercektenCik = false;
     public bool BaslangictaGizle { get; set; } = false;
+    private System.Windows.Forms.Timer? _canliIzlemeTimer;
 
     public AnaForm(IYaziciServisi yaziciServisi, IYaziciYoneticisi yaziciYoneticisi)
     {
@@ -37,6 +38,7 @@ public class AnaForm : Form
 
         ArayuzuHazirla();
         VerileriYukle();
+        CanliIzlemeyiBaslat();
     }
 
     private void ArayuzuHazirla()
@@ -190,21 +192,126 @@ public class AnaForm : Form
 
     private void VerileriYukle()
     {
-        // 1. Şablonları Doldur
-        cmbSablonlar.Items.Clear();
-        foreach (var s in _yaziciServisi.MevcutSablonlariGetir())
-        {
-            cmbSablonlar.Items.Add(s);
-        }
-        if (cmbSablonlar.Items.Count > 0) cmbSablonlar.SelectedIndex = 0;
+        SablonlariYenile();
+        YazicilariYenile();
+    }
 
-        // 2. Yazıcıları Doldur
+    private void CanliIzlemeyiBaslat()
+    {
+        _canliIzlemeTimer = new System.Windows.Forms.Timer { Interval = 1000 };
+        _canliIzlemeTimer.Tick += (s, e) =>
+        {
+            YazicilariYenile();
+            SablonlariYenile();
+        };
+        _canliIzlemeTimer.Start();
+    }
+
+    private const int WM_DEVICECHANGE = 0x0219;
+    protected override void WndProc(ref Message m)
+    {
+        base.WndProc(ref m);
+        if (m.Msg == WM_DEVICECHANGE)
+        {
+            _yaziciYoneticisi.AgTaramasiTetikle();
+            YazicilariYenile();
+        }
+    }
+
+    public void YazicilariYenile()
+    {
+        if (InvokeRequired)
+        {
+            BeginInvoke(new Action(YazicilariYenile));
+            return;
+        }
+
+        var yeniListe = _yaziciYoneticisi.YukluYazicilariGetir();
+
+        var mevcutListe = new List<string>();
+        foreach (var item in cmbYazicilar.Items)
+        {
+            mevcutListe.Add(item.ToString() ?? "");
+        }
+
+        if (mevcutListe.SequenceEqual(yeniListe))
+        {
+            return;
+        }
+
+        string? seciliOlan = cmbYazicilar.SelectedItem?.ToString();
+
+        cmbYazicilar.BeginUpdate();
         cmbYazicilar.Items.Clear();
-        foreach (var y in _yaziciYoneticisi.YukluYazicilariGetir())
+        foreach (var y in yeniListe)
         {
             cmbYazicilar.Items.Add(y);
         }
-        if (cmbYazicilar.Items.Count > 0) cmbYazicilar.SelectedIndex = 0;
+
+        if (yeniListe.Count > 0)
+        {
+            if (!string.IsNullOrWhiteSpace(seciliOlan) && yeniListe.Contains(seciliOlan))
+            {
+                cmbYazicilar.SelectedItem = seciliOlan;
+            }
+            else
+            {
+                cmbYazicilar.SelectedIndex = 0;
+                GuncelleYaziciOnerisi();
+            }
+        }
+        cmbYazicilar.EndUpdate();
+
+        int yerelSayisi = yeniListe.Count(y => !y.StartsWith('['));
+        int agSayisi = yeniListe.Count(y => y.StartsWith('['));
+
+        if (yeniListe.Count > 0)
+        {
+            lblDurum.Text = $"🟢 Hazır: {yerelSayisi} yerel USB yazıcı, {agSayisi} ağ yazıcısı aktif.";
+            lblDurum.ForeColor = Color.FromArgb(52, 211, 153);
+        }
+        else
+        {
+            lblDurum.Text = "⚠️ Aktif fiziksel yazıcı bulunamadı (USB kablosunu veya ağ bağlantısını kontrol edin).";
+            lblDurum.ForeColor = Color.FromArgb(248, 113, 113);
+        }
+    }
+
+    public void SablonlariYenile()
+    {
+        if (InvokeRequired)
+        {
+            BeginInvoke(new Action(SablonlariYenile));
+            return;
+        }
+
+        var yeniSablonlar = _yaziciServisi.MevcutSablonlariGetir();
+        var mevcutSablonlar = new List<string>();
+        foreach (var item in cmbSablonlar.Items)
+        {
+            mevcutSablonlar.Add(item.ToString() ?? "");
+        }
+
+        if (mevcutSablonlar.SequenceEqual(yeniSablonlar))
+        {
+            return;
+        }
+
+        string? secili = cmbSablonlar.SelectedItem?.ToString();
+        cmbSablonlar.BeginUpdate();
+        cmbSablonlar.Items.Clear();
+        foreach (var s in yeniSablonlar)
+        {
+            cmbSablonlar.Items.Add(s);
+        }
+        if (cmbSablonlar.Items.Count > 0)
+        {
+            if (!string.IsNullOrWhiteSpace(secili) && yeniSablonlar.Contains(secili))
+                cmbSablonlar.SelectedItem = secili;
+            else
+                cmbSablonlar.SelectedIndex = 0;
+        }
+        cmbSablonlar.EndUpdate();
     }
 
     private void GuncelleYaziciOnerisi()
@@ -423,6 +530,8 @@ public class AnaForm : Form
         }
         else
         {
+            _canliIzlemeTimer?.Stop();
+            _canliIzlemeTimer?.Dispose();
             _notifyIcon.Visible = false;
             _notifyIcon.Dispose();
             base.OnFormClosing(e);
