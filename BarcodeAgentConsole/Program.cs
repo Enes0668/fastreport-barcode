@@ -127,7 +127,39 @@ Console.WriteLine($"   🌐 HBYS Test Ekranı   : http://localhost:{aktifHubPort
 Console.WriteLine("=========================================================================");
 Console.ResetColor();
 
-await app.RunAsync();
+// Arka planda SignalR Hub, TCP 5055 dinleyicisi ve ağ paylaşımını kesintisiz çalıştır:
+var webTask = app.RunAsync();
+
+// Ön planda doğrudan FastReport Görsel Şablon Tasarımcısını aç:
+bool sessizMod = args.Any(a => string.Equals(a, "--headless", StringComparison.OrdinalIgnoreCase) ||
+                               string.Equals(a, "--no-gui", StringComparison.OrdinalIgnoreCase));
+
+if (!sessizMod)
+{
+    var tasarimciThread = new Thread(() =>
+    {
+        try
+        {
+            string sablonDosyasi = Path.Combine(exeDizini, "etiket_sablonu.frx");
+            if (File.Exists(sablonDosyasi))
+            {
+                using var report = new Report();
+                report.Load(sablonDosyasi);
+                report.Design();
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"FastReport Tasarımcısı uyarısı: {ex.Message}");
+        }
+    });
+
+    tasarimciThread.SetApartmentState(ApartmentState.STA);
+    tasarimciThread.IsBackground = true;
+    tasarimciThread.Start();
+}
+
+await webTask;
 
 static int BosPortBul(int baslangicPort)
 {
