@@ -1,0 +1,16 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Report ScriptLanguage="CSharp" ReportInfo.Created="11/03/2026 11:43:40" ReportInfo.Modified="11/03/2026 11:43:40" ReportInfo.CreatorVersion="2026.2.8.0">
+  <Dictionary>
+    <Parameter Name="IstekId" DataType="System.String" AsString="504"/>
+    <Parameter Name="BarkodNo" DataType="System.String" AsString="869012345"/>
+    <Parameter Name="HastaAdi" DataType="System.String" AsString="Test Hasta"/>
+    <Parameter Name="ProtokolNo" DataType="System.String" AsString="P-504"/>
+    <Parameter Name="Bolum" DataType="System.String" AsString="Poliklinik"/>
+  </Dictionary>
+  <ReportPage Name="Page1" Watermark.Font="Arial, 60pt">
+    <DataBand Name="Data1" Height="151.2">
+      <TextObject Name="txtBaslik" Width="718.2" Height="25" Text="[HASTANE RAPORU / REÇETE]" HorzAlign="Center" Font="Arial, 12pt, style=Bold"/>
+      <BarcodeObject Name="Barcode1" Left="37.8" Top="30" Width="302.4" Height="60" Expression="[BarkodNo]" Barcode="Code128" Barcode.AutoEncode="true"/>
+    </DataBand>
+  </ReportPage>
+</Report>

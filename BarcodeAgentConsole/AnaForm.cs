@@ -20,8 +20,10 @@ public class AnaForm : Form
     private ComboBox cmbSablonlar = null!;
     private ComboBox cmbYazicilar = null!;
     private Button btnTasarla = null!;
+    private Button btnOnizle = null!;
     private Button btnYeniSablon = null!;
     private Button btnTestBaski = null!;
+    private CheckBox chkOnizle = null!;
     private Label lblDurum = null!;
 
     public AnaForm(IYaziciServisi yaziciServisi, IYaziciYoneticisi yaziciYoneticisi)
@@ -36,7 +38,7 @@ public class AnaForm : Form
     private void ArayuzuHazirla()
     {
         Text = "FastReport Barkod & Şablon Yönetim Paneli";
-        Size = new Size(580, 390);
+        Size = new Size(600, 420);
         StartPosition = FormStartPosition.CenterScreen;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
@@ -57,7 +59,7 @@ public class AnaForm : Form
 
         var lblAltBaslik = new Label
         {
-            Text = "Seçtiğiniz şablonu tasarlayabilir veya arka planda SignalR / TCP ile basabilirsiniz.",
+            Text = "Şablonları tasarlayabilir, ekranda önizleyebilir veya yazdırma testi yapabilirsiniz.",
             Font = new Font("Segoe UI", 8.5f),
             ForeColor = Color.FromArgb(148, 163, 184),
             Location = new Point(22, 48),
@@ -72,7 +74,7 @@ public class AnaForm : Form
         cmbSablonlar = new ComboBox
         {
             Location = new Point(24, 110),
-            Width = 360,
+            Width = 380,
             DropDownStyle = ComboBoxStyle.DropDownList,
             BackColor = Color.FromArgb(30, 41, 59),
             ForeColor = Color.White,
@@ -84,7 +86,7 @@ public class AnaForm : Form
         btnYeniSablon = new Button
         {
             Text = "➕ Yeni Ekle",
-            Location = new Point(395, 108),
+            Location = new Point(415, 108),
             Width = 145,
             Height = 30,
             BackColor = Color.FromArgb(51, 65, 85),
@@ -96,13 +98,13 @@ public class AnaForm : Form
         Controls.Add(btnYeniSablon);
 
         // Hedef Yazıcı Grubu
-        var lblYazici = new Label { Text = "🖨️ Hedef Yazıcı (Zebra Barkod veya Brother A4):", Location = new Point(22, 155), AutoSize = true };
+        var lblYazici = new Label { Text = "🖨️ Hedef Yazıcı (Zebra Barkod veya Brother A4):", Location = new Point(22, 150), AutoSize = true };
         Controls.Add(lblYazici);
 
         cmbYazicilar = new ComboBox
         {
-            Location = new Point(24, 180),
-            Width = 516,
+            Location = new Point(24, 175),
+            Width = 536,
             DropDownStyle = ComboBoxStyle.DropDownList,
             BackColor = Color.FromArgb(30, 41, 59),
             ForeColor = Color.White,
@@ -110,12 +112,23 @@ public class AnaForm : Form
         };
         Controls.Add(cmbYazicilar);
 
+        // Önizleme Seçeneği Kutucuğu
+        chkOnizle = new CheckBox
+        {
+            Text = "🔍 Test basarken önce ekranda önizle (FastReport Preview)",
+            Location = new Point(24, 215),
+            AutoSize = true,
+            ForeColor = Color.FromArgb(147, 197, 253),
+            Cursor = Cursors.Hand
+        };
+        Controls.Add(chkOnizle);
+
         // Butonlar
         btnTasarla = new Button
         {
-            Text = "🎨 SEÇİLİ ŞABLONU TASARLA (FASTREPORT)",
-            Location = new Point(24, 230),
-            Width = 360,
+            Text = "🎨 Şablonu Tasarla",
+            Location = new Point(24, 250),
+            Width = 210,
             Height = 44,
             BackColor = Color.FromArgb(37, 99, 235),
             ForeColor = Color.White,
@@ -126,11 +139,26 @@ public class AnaForm : Form
         btnTasarla.Click += BtnTasarla_Click;
         Controls.Add(btnTasarla);
 
+        btnOnizle = new Button
+        {
+            Text = "🔍 Önizle",
+            Location = new Point(244, 250),
+            Width = 150,
+            Height = 44,
+            BackColor = Color.FromArgb(99, 102, 241),
+            ForeColor = Color.White,
+            Font = new Font("Segoe UI", 10f, FontStyle.Bold),
+            FlatStyle = FlatStyle.Flat,
+            Cursor = Cursors.Hand
+        };
+        btnOnizle.Click += BtnOnizle_Click;
+        Controls.Add(btnOnizle);
+
         btnTestBaski = new Button
         {
             Text = "⚡ Test Bas",
-            Location = new Point(395, 230),
-            Width = 145,
+            Location = new Point(404, 250),
+            Width = 156,
             Height = 44,
             BackColor = Color.FromArgb(16, 185, 129),
             ForeColor = Color.White,
@@ -147,7 +175,7 @@ public class AnaForm : Form
             Text = "🟢 Ajan Aktif: Port 5055 (TCP) ve Port 5000 (SignalR Hub) arka planda dinliyor.",
             Font = new Font("Segoe UI", 8.5f, FontStyle.Regular),
             ForeColor = Color.FromArgb(52, 211, 153),
-            Location = new Point(22, 305),
+            Location = new Point(22, 325),
             AutoSize = true
         };
         Controls.Add(lblDurum);
@@ -266,18 +294,52 @@ public class AnaForm : Form
         }
     }
 
+    private void BtnOnizle_Click(object? sender, EventArgs e)
+    {
+        string? sablon = cmbSablonlar.SelectedItem?.ToString();
+        string? yazici = cmbYazicilar.SelectedItem?.ToString();
+
+        var testParametreler = new System.Collections.Generic.Dictionary<string, string>
+        {
+            { "HastaAdi", "Ahmet Yılmaz (Önizleme)" },
+            { "BarkodNo", "869012345" },
+            { "ProtokolNo", "P-98765" },
+            { "Bolum", "Acil Servis / Laboratuvar" },
+            { "Tarih", DateTime.Now.ToString("dd.MM.yyyy HH:mm") }
+        };
+
+        var sonuc = _yaziciServisi.RaporOnizle("TEST-ONIZLE", yazici, testParametreler, sablon);
+        if (!sonuc.Basarili)
+        {
+            MessageBox.Show(sonuc.Mesaj, "Önizleme Hatası", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+    }
+
     private void BtnTestBaski_Click(object? sender, EventArgs e)
     {
         string? sablon = cmbSablonlar.SelectedItem?.ToString();
         string? yazici = cmbYazicilar.SelectedItem?.ToString();
 
-        var sonuc = _yaziciServisi.BarkodBas("TEST-999", yazici, new System.Collections.Generic.Dictionary<string, string>
+        var testParametreler = new System.Collections.Generic.Dictionary<string, string>
         {
             { "HastaAdi", "Test Hasta (Panelden)" },
             { "BarkodNo", "869099901" },
             { "ProtokolNo", "P-TEST" },
-            { "Bolum", "Panel Test" }
-        }, sablon);
+            { "Bolum", "Panel Test" },
+            { "Tarih", DateTime.Now.ToString("dd.MM.yyyy HH:mm") }
+        };
+
+        if (chkOnizle.Checked)
+        {
+            var sonucOnizle = _yaziciServisi.RaporOnizle("TEST-999", yazici, testParametreler, sablon);
+            if (!sonucOnizle.Basarili)
+            {
+                MessageBox.Show(sonucOnizle.Mesaj, "Önizleme Hatası", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+            return;
+        }
+
+        var sonuc = _yaziciServisi.BarkodBas("TEST-999", yazici, testParametreler, sablon);
 
         if (sonuc.Basarili)
         {

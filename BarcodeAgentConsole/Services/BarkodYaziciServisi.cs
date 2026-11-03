@@ -365,6 +365,74 @@ public class BarkodYaziciServisi : IYaziciServisi
     }
 
     /// <summary>
+    /// FastReport Önizleme Penceresini (ShowPrepared) ekranda açar.
+    /// Kullanıcı ekranda barkodu ve bilgileri inceleyebilir; isterse araç çubuğundaki 'Yazdır' butonuyla basabilir.
+    /// </summary>
+    public (bool Basarili, string Mesaj) RaporOnizle(string istekId, string? ozelYazici = null, Dictionary<string, string>? parametreler = null, string? sablonAdi = null)
+    {
+        try
+        {
+            string aktifSablonYolu = HedefSablonYolunuBul(sablonAdi);
+            if (!File.Exists(aktifSablonYolu))
+            {
+                string msg = $"Şablon dosyası bulunamadı: {aktifSablonYolu}";
+                _logger.LogError("{Mesaj}", msg);
+                return (false, msg);
+            }
+
+            string hedefYazici = !string.IsNullOrWhiteSpace(ozelYazici)
+                ? ozelYazici
+                : _yaziciYoneticisi.VarsayilanYaziciyiGetir(_config["Printer:Name"]);
+
+            var staThread = new Thread(() =>
+            {
+                try
+                {
+                    using var report = new Report();
+                    report.Load(aktifSablonYolu);
+
+                    if (!string.IsNullOrWhiteSpace(_postgresConnectionString))
+                    {
+                        foreach (DataConnectionBase conn in report.Dictionary.Connections)
+                        {
+                            if (conn is PostgresDataConnection || conn.GetType().Name.Contains("Postgres"))
+                                conn.ConnectionString = _postgresConnectionString;
+                        }
+                    }
+
+                    SablonParametreleriniUygula(report, istekId, parametreler);
+
+                    if (!string.IsNullOrWhiteSpace(hedefYazici) && !hedefYazici.StartsWith('['))
+                    {
+                        report.PrintSettings.Printer = hedefYazici;
+                    }
+
+                    report.Prepare();
+                    report.ShowPrepared();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "FastReport önizleme penceresi açılırken hata oluştu.");
+                }
+            });
+
+            staThread.SetApartmentState(ApartmentState.STA);
+            staThread.IsBackground = true;
+            staThread.Start();
+
+            string bilgiMsg = $"İstek #{istekId} için '{Path.GetFileName(aktifSablonYolu)}' önizleme penceresi açıldı.";
+            _logger.LogInformation("🔍 {Mesaj}", bilgiMsg);
+            return (true, bilgiMsg);
+        }
+        catch (Exception ex)
+        {
+            string msg = $"Önizleme başlatılamadı (İstek #{istekId}): {ex.Message}";
+            _logger.LogError(ex, "{Mesaj}", msg);
+            return (false, msg);
+        }
+    }
+
+    /// <summary>
     /// Şablondaki tüm parametreleri tamamen dinamik Key-Value mantığıyla doldurur:
     /// 1) Önce appsettings.json -> SablonParametreleri altındaki tüm Key-Value çiftlerini okur,
     /// 2) Sonra istekten gelen dinamik parametreler (gelenParametreler) varsa üzerine yazar,

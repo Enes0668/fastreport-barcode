@@ -71,16 +71,25 @@ public class YerelBarkodHub : Hub
     }
 
     /// <summary>
-    /// HBYS Web sayfasından İstek ID, Hedef Yazıcı (örn. A bilgisayarının yazıcısı) ve
-    /// opsiyonel şablon parametreleri birlikte gönderildiğinde tetiklenir.
+    /// HBYS Web sayfasından İstek ID, Hedef Yazıcı (örn. A bilgisayarının yazıcısı),
+    /// opsiyonel şablon parametreleri ve OnizlemeGoster bayrağı birlikte gönderildiğinde tetiklenir.
     /// </summary>
     public async Task BarkodYazdirGelismi(BarkodEmirModel emir)
     {
         string hedef = emir.HedefYazici ?? _yaziciServisi.VarsayilanYazici;
-        _logger.LogInformation("📥 [YEREL HUB] Web'den 'BarkodYazdirGelismi' emri alındı -> İstek #{IstekId}, Hedef: '{Yazici}', Şablon: '{Sablon}'",
-            emir.IstekId, hedef, emir.SablonAdi ?? "Varsayılan");
+        _logger.LogInformation("📥 [YEREL HUB] Web'den 'BarkodYazdirGelismi' emri alındı -> İstek #{IstekId}, Hedef: '{Yazici}', Şablon: '{Sablon}', Önizleme: {Onizle}",
+            emir.IstekId, hedef, emir.SablonAdi ?? "Varsayılan", emir.OnizlemeGoster);
 
-        var sonuc = _yaziciServisi.BarkodBas(emir.IstekId, emir.HedefYazici, emir.Parametreler, emir.SablonAdi);
+        (bool Basarili, string Mesaj) sonuc;
+
+        if (emir.OnizlemeGoster)
+        {
+            sonuc = _yaziciServisi.RaporOnizle(emir.IstekId, emir.HedefYazici, emir.Parametreler, emir.SablonAdi);
+        }
+        else
+        {
+            sonuc = _yaziciServisi.BarkodBas(emir.IstekId, emir.HedefYazici, emir.Parametreler, emir.SablonAdi);
+        }
 
         await Clients.All.SendAsync("BaskiSonucuAlindi", new BarkodSonucModel
         {
@@ -90,6 +99,15 @@ public class YerelBarkodHub : Hub
             Yazici = hedef,
             Tarih = DateTime.Now
         });
+    }
+
+    /// <summary>
+    /// HBYS Web sayfasından doğrudan ekranda FastReport Önizleme Penceresini açmak için çağrılır.
+    /// </summary>
+    public async Task BarkodOnizle(BarkodEmirModel emir)
+    {
+        emir.OnizlemeGoster = true;
+        await BarkodYazdirGelismi(emir);
     }
 
     /// <summary>

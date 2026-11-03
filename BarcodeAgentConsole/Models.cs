@@ -13,6 +13,12 @@ public class BarkodEmirModel
     public string? HedefYazici { get; set; }
     public string? SablonAdi { get; set; }
     public Dictionary<string, string>? Parametreler { get; set; }
+
+    /// <summary>
+    /// Eğer true ise etiket doğrudan yazıcıya gitmek yerine ekranda FastReport Önizleme Penceresi açılır.
+    /// Kullanıcı ekrandan inceleyip 'Yazdır' butonuyla baskıyı onaylar.
+    /// </summary>
+    public bool OnizlemeGoster { get; set; } = false;
 }
 
 /// <summary>
