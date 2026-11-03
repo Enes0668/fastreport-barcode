@@ -50,9 +50,9 @@ public static class AgGuvenlikKurulumu
 
         if (!zorlaKurulum && KurulumZatenTamamMi(exeYolu))
         {
-            Console.ForegroundColor = ConsoleColor.DarkGreen;
+            SafeColor(ConsoleColor.DarkGreen);
             Console.WriteLine("   🛡️ Ağ ve Güvenlik Duvarı izinleri hazır (Kurulum tam).");
-            Console.ResetColor();
+            SafeReset();
             return;
         }
 
@@ -64,10 +64,10 @@ public static class AgGuvenlikKurulumu
         }
 
         // Yönetici değilse sadece bu sefere mahsus kendi kendisini Yönetici izniyle ("runas") çağır:
-        Console.ForegroundColor = ConsoleColor.Yellow;
+        SafeColor(ConsoleColor.Yellow);
         Console.WriteLine("   🛡️ İlk kurulum algılandı: Ağ ve Güvenlik Duvarı izinleri tanımlanıyor...");
         Console.WriteLine("      👉 Lütfen açılan Windows izin penceresinde 'Evet' seçeneğine tıklayın (Sadece 1 kez sorulur).");
-        Console.ResetColor();
+        SafeReset();
 
         try
         {
@@ -84,22 +84,22 @@ public static class AgGuvenlikKurulumu
 
             if (proc != null && proc.ExitCode == 0)
             {
-                Console.ForegroundColor = ConsoleColor.Green;
+                SafeColor(ConsoleColor.Green);
                 Console.WriteLine("   ✅ Otomatik ağ ve güvenlik duvarı kurulumu tamamlandı! Sonraki açılışlarda tekrar sorulmayacak.");
-                Console.ResetColor();
+                SafeReset();
             }
         }
         catch (Win32Exception ex) when (ex.NativeErrorCode == 1223)
         {
-            Console.ForegroundColor = ConsoleColor.DarkYellow;
+            SafeColor(ConsoleColor.DarkYellow);
             Console.WriteLine("   ⚠️ Yönetici izni onaylanmadı; mevcut ağ ayarlarıyla devam ediliyor.");
-            Console.ResetColor();
+            SafeReset();
         }
         catch (Exception ex)
         {
-            Console.ForegroundColor = ConsoleColor.DarkYellow;
+            SafeColor(ConsoleColor.DarkYellow);
             Console.WriteLine($"   ⚠️ Otomatik kurulum uyarısı: {ex.Message}");
-            Console.ResetColor();
+            SafeReset();
         }
     }
 
@@ -191,12 +191,12 @@ public static class AgGuvenlikKurulumu
 
     private static void YoneticiKurulumunuUygula(string exeYolu, bool altPencereBekle)
     {
-        Console.Title = "FastReport Barkod Ajanı - Otomatik Ağ ve Güvenlik Kurulumu";
-        Console.ForegroundColor = ConsoleColor.Cyan;
+        try { Console.Title = "FastReport Barkod Ajanı - Otomatik Ağ ve Güvenlik Kurulumu"; } catch { }
+        SafeColor(ConsoleColor.Cyan);
         Console.WriteLine("=========================================================================");
         Console.WriteLine("   🏥 FASTREPORT BARKOD AJANI - GÖMÜLÜ AĞ VE GÜVENLİK KURULUMU           ");
         Console.WriteLine("=========================================================================");
-        Console.ResetColor();
+        SafeReset();
 
         // 1. Ağ Profilini Private (Özel Ağ) Yap
         Console.WriteLine("[1/4] Ağ profili 'Özel Ağ (Private)' olarak ayarlanıyor...");
@@ -224,11 +224,11 @@ public static class AgGuvenlikKurulumu
         SessizKomutCalistir("netsh.exe", $"advfirewall firewall delete rule name=\"{PingKuralAdi}\"");
         SessizKomutCalistir("netsh.exe", $"advfirewall firewall add rule name=\"{PingKuralAdi}\" protocol=icmpv4:8,any dir=in action=allow profile=any enable=yes");
 
-        Console.ForegroundColor = ConsoleColor.Green;
+        SafeColor(ConsoleColor.Green);
         Console.WriteLine("=========================================================================");
         Console.WriteLine("   ✅ TÜM AĞ VE GÜVENLİK DUVARI AYARLARI BAŞARIYLA TANIMLANDI!          ");
         Console.WriteLine("=========================================================================");
-        Console.ResetColor();
+        SafeReset();
 
         if (altPencereBekle)
         {
@@ -257,5 +257,15 @@ public static class AgGuvenlikKurulumu
         {
             // Hata olsa bile diğer kurallara devam et
         }
+    }
+
+    private static void SafeColor(ConsoleColor color)
+    {
+        try { Console.ForegroundColor = color; } catch { }
+    }
+
+    private static void SafeReset()
+    {
+        try { Console.ResetColor(); } catch { }
     }
 }

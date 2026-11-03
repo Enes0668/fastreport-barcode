@@ -124,7 +124,7 @@ public class BarkodAjanWorker : BackgroundService
 
                 _logger.LogInformation("🚀 [AJAN BAŞLATILDI] Bilgisayar: '{AjanAdi}', Yerel Port: {Port}", _ajanAdi, _aktifTcpPort);
 
-                Console.Title = $"FastReport Barkod Ajanı - {_ajanAdi} ({_yerelIp}:{_aktifTcpPort})";
+                try { Console.Title = $"FastReport Barkod Ajanı - {_ajanAdi} ({_yerelIp}:{_aktifTcpPort})"; } catch { }
                 break;
             }
             catch (SocketException)
@@ -334,7 +334,7 @@ public class BarkodAjanWorker : BackgroundService
                 if (aktifYerelIpler.Count > 0 && _yerelIp != aktifYerelIpler[0])
                 {
                     _yerelIp = aktifYerelIpler[0];
-                    Console.Title = $"FastReport Barkod Ajanı - {_ajanAdi} ({_yerelIp}:{_aktifTcpPort})";
+                    try { Console.Title = $"FastReport Barkod Ajanı - {_ajanAdi} ({_yerelIp}:{_aktifTcpPort})"; } catch { }
                 }
 
                 using var semaphore = new SemaphoreSlim(35);
